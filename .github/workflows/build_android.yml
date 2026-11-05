@@ -1,0 +1,219 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  # 项目 README 与桌面 workflow 都要求 Flutter 3.47.5 / Dart 3.10。
+  # 固定版本而不是 channel: stable，避免 Flutter 升级后 Gradle/AGP 漂移。
+  FLUTTER_VERSION: "3.47.5"
+  # Flutter 3.47.5 默认值，同时也是 mpv_audio_kit 锁定的要求：
+  #   android/build.gradle.kts -> compileSdk 36 / minSdk 24 / ndkVersion 28.2.13676358
+  ANDROID_COMPILE_SDK: "36"
+  ANDROID_BUILD_TOOLS: "36.0.0"
+  ANDROID_NDK_VERSION: "28.2.13676358"
+  ANDROID_CMAKE_VERSION: "3.22.1"
+  # 本轮只出 arm64-v8a，收窄 Rust 交叉编译与 libmpv 下载的变量。
+  ANDROID_TARGET_PLATFORM: "android-arm64"
+  # 正式签名所需的 4 个 secrets；未配置时保持 Flutter 模板的 debug 签名。
+  SIGNING_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+  SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+  SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+  SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java (Gradle 9.3 / AGP 9.1)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Setup Flutter ${{ env.FLUTTER_VERSION }}
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: "stable"
+          cache: true
+
+      - name: Setup Rust (Android targets)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # release 构建只需 aarch64，其余一并装上，方便后续开多 ABI。
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager \
+            "platforms;android-${ANDROID_COMPILE_SDK}" \
+            "build-tools;${ANDROID_BUILD_TOOLS}" \
+            "ndk;${ANDROID_NDK_VERSION}" \
+            "cmake;${ANDROID_CMAKE_VERSION}"
+
+      - name: Export NDK paths
+        run: |
+          echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
+
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev llvm clang cmake ninja-build
+
+      - name: Print toolchain versions
+        run: |
+          flutter --version
+          rustc --version
+          java -version
+          sdkmanager --list_installed | head -30
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      # 上游是桌面项目，仓库里没有 android/；在 CI 里生成固定 applicationId 的 runner。
+      # Flutter 3.47.5 的 create 会无条件重写 pubspec.lock 为只含 SDK 依赖的空壳，
+      # 因此先备份并在 runner 生成后恢复，随后重新 pub get 校验完整依赖树。
+      - name: Generate Android runner (if missing)
+        run: |
+          cp pubspec.lock pubspec.lock.bak
+          if [ ! -d android ]; then
+            flutter create \
+              --platforms=android \
+              --org com.midihl \
+              --project-name myune_music_android \
+              --android-language kotlin \
+              --no-pub .
+          fi
+          mv pubspec.lock.bak pubspec.lock
+          flutter pub get
+          test -f android/app/build.gradle.kts
+          grep -F "url: https://github.com/xiaobaimc/mpv_audio_kit.git" pubspec.lock
+
+      # mpv_audio_kit 的 Manifest 已带 FOREGROUND_SERVICE / POST_NOTIFICATIONS，
+      # 这里只补歌词抓取等网络功能需要的 INTERNET。
+      - name: Patch AndroidManifest permissions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          manifest = Path("android/app/src/main/AndroidManifest.xml")
+          text = manifest.read_text(encoding="utf-8")
+          if "android.permission.INTERNET" not in text:
+              start = text.find("<manifest")
+              end = text.find(">", start)
+              if start < 0 or end < 0:
+                  raise SystemExit("cannot locate <manifest ...> opening tag")
+              permission = '\n    <uses-permission android:name="android.permission.INTERNET"/>'
+              text = text[: end + 1] + permission + text[end + 1 :]
+              manifest.write_text(text, encoding="utf-8")
+              print("injected android.permission.INTERNET")
+          else:
+              print("android.permission.INTERNET already present")
+          PY
+
+      # 可选正式签名：4 个 secrets 齐全时切换 release signingConfig；
+      # 任一缺失则完全不动 runner，保留模板的 debug 签名用于本轮真机测试。
+      - name: Configure release signing (optional)
+        run: |
+          set -e
+          if [ -z "$SIGNING_KEYSTORE_B64" ] || [ -z "$SIGNING_STORE_PASSWORD" ] || \
+             [ -z "$SIGNING_KEY_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ]; then
+            echo "Release signing secrets not configured; keeping debug signing."
+            exit 0
+          fi
+          printf '%s' "$SIGNING_KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          def esc(value):
+              for old, new in (("\\", "\\\\"), (":", "\\:"), ("=", "\\="),
+                               ("#", "\\#"), ("!", "\\!")):
+                  value = value.replace(old, new)
+              return value
+
+          values = {
+              "storeFile": "upload-keystore.jks",
+              "storePassword": os.environ["SIGNING_STORE_PASSWORD"],
+              "keyPassword": os.environ["SIGNING_KEY_PASSWORD"],
+              "keyAlias": os.environ["SIGNING_KEY_ALIAS"],
+          }
+          Path("android/key.properties").write_text(
+              "".join(f"{k}={esc(v)}\n" for k, v in values.items()),
+              encoding="utf-8",
+          )
+
+          gradle = Path("android/app/build.gradle.kts")
+          text = gradle.read_text(encoding="utf-8")
+          if "android-port:signing" in text:
+              raise SystemExit("signing config already patched")
+
+          imports = (
+              "// android-port:signing\n"
+              "import java.util.Properties\n"
+              "import java.io.FileInputStream\n\n"
+          )
+          keystore_block = (
+              'val keystoreProperties = Properties().apply {\n'
+              '    val propertiesFile = rootProject.file("key.properties")\n'
+              '    if (propertiesFile.exists()) {\n'
+              '        FileInputStream(propertiesFile).use { load(it) }\n'
+              '    }\n'
+              '}\n\n'
+          )
+          signing_configs = (
+              '    signingConfigs {\n'
+              '        create("release") {\n'
+              '            storeFile = file(keystoreProperties.getProperty("storeFile"))\n'
+              '            storePassword = keystoreProperties.getProperty("storePassword")\n'
+              '            keyAlias = keystoreProperties.getProperty("keyAlias")\n'
+              '            keyPassword = keystoreProperties.getProperty("keyPassword")\n'
+              '        }\n'
+              '    }\n'
+          )
+
+          anchor = "\nandroid {"
+          if anchor not in text:
+              raise SystemExit("cannot locate android { block")
+          text = imports + text
+          index = text.index(anchor)
+          text = text[:index] + "\n" + keystore_block + text[index:]
+          text = text.replace(anchor, anchor + "\n" + signing_configs, 1)
+          text = text.replace(
+              'signingConfig = signingConfigs.getByName("debug")',
+              'signingConfig = signingConfigs.getByName("release")',
+          )
+          gradle.write_text(text, encoding="utf-8")
+          print("release signingConfig enabled")
+          PY
+
+      - name: Build APK (arm64-v8a, release)
+        run: flutter build apk --release --target-platform "${ANDROID_TARGET_PLATFORM}"
+
+      - name: Inspect APK
+        run: |
+          ls -lh build/app/outputs/flutter-apk/
+          sha256sum build/app/outputs/flutter-apk/*.apk
+          apksigner="${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
+          for apk in build/app/outputs/flutter-apk/*.apk; do
+            "$apksigner" verify --print-certs "$apk" | head -12 || true
+          done
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: myune-music-android-arm64
+          path: build/app/outputs/flutter-apk/*.apk
+          if-no-files-found: error
+          retention-days: 30

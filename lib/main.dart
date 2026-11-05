@@ -42,28 +42,32 @@ void main() async {
 
   AppLicenses.register();
 
-  // 初始化全局快捷键管理器
-  await hotKeyManager.unregisterAll();
+  // ===== 以下为桌面端专属初始化，Android 上跳过 =====
+  if (!Platform.isAndroid) {
+    // 初始化全局快捷键管理器
+    await hotKeyManager.unregisterAll();
 
-  // 先初始化window_manager
-  await windowManager.ensureInitialized();
+    // 先初始化window_manager
+    await windowManager.ensureInitialized();
 
-  // 回调函数
-  FlutterSingleInstance.onFocus =
-      (Map<String, dynamic> metadata) async {
-            // 先恢复窗口，再显示和聚焦
-            await windowManager.restore();
-            await windowManager.show();
-            await windowManager.focus();
-          }
-          as FutureOr<void> Function(Map<String, dynamic>)?;
+    // 回调函数
+    FlutterSingleInstance.onFocus =
+        (Map<String, dynamic> metadata) async {
+              // 先恢复窗口，再显示和聚焦
+              await windowManager.restore();
+              await windowManager.show();
+              await windowManager.focus();
+            }
+            as FutureOr<void> Function(Map<String, dynamic>)?;
 
-  // 单实例检测
-  final singleInstance = FlutterSingleInstance();
-  if (!await singleInstance.isFirstInstance()) {
-    await singleInstance.focus();
-    exit(0); // 退出第二个实例
+    // 单实例检测
+    final singleInstance = FlutterSingleInstance();
+    if (!await singleInstance.isFirstInstance()) {
+      await singleInstance.focus();
+      exit(0); // 退出第二个实例
+    }
   }
+  // ===== 桌面端专属初始化结束 =====
 
   PaintingBinding.instance.imageCache.maximumSize = 200;
   PaintingBinding.instance.imageCache.maximumSizeBytes = 20 * 1024 * 1024;
@@ -72,61 +76,65 @@ void main() async {
 
   await RustLib.init();
 
-  // 初始化系统托盘
-  await trayManager.setIcon('assets/images/icon/tray_icon.ico');
-  if (!Platform.isLinux) {
-    await trayManager.setToolTip('MyuneMusic');
-  }
+  // 初始化系统托盘（仅桌面）
+  if (!Platform.isAndroid) {
+    await trayManager.setIcon('assets/images/icon/tray_icon.ico');
+    if (!Platform.isLinux) {
+      await trayManager.setToolTip('MyuneMusic');
+    }
 
-  final Menu menu = Menu(
-    items: [
-      MenuItem(key: 'prev_song', label: '上一首'),
-      MenuItem(key: 'play_pause', label: '播放/暂停'),
-      MenuItem(key: 'next_song', label: '下一首'),
-      MenuItem.separator(),
-      MenuItem(key: 'show_window', label: '显示窗口'),
-      MenuItem.separator(),
-      MenuItem(key: 'exit_app', label: '退出'),
-    ],
-  );
-  await trayManager.setContextMenu(menu);
+    final Menu menu = Menu(
+      items: [
+        MenuItem(key: 'prev_song', label: '上一首'),
+        MenuItem(key: 'play_pause', label: '播放/暂停'),
+        MenuItem(key: 'next_song', label: '下一首'),
+        MenuItem.separator(),
+        MenuItem(key: 'show_window', label: '显示窗口'),
+        MenuItem.separator(),
+        MenuItem(key: 'exit_app', label: '退出'),
+      ],
+    );
+    await trayManager.setContextMenu(menu);
+  }
 
   // // 初始化window_manager
   // await windowManager.ensureInitialized();
 
-  // 初始化窗口状态管理器
-  final windowState = WindowStateManager();
-  final initialSize = await windowState.loadWindowSize();
-  final initialPosition = await windowState.loadWindowPosition();
+  // 初始化窗口状态管理器（仅桌面）
+  if (!Platform.isAndroid) {
+    final windowState = WindowStateManager();
+    final initialSize = await windowState.loadWindowSize();
+    final initialPosition = await windowState.loadWindowPosition();
 
-  const minPossibleSize = Size(480, 600);
-  final windowOptions = WindowOptions(
-    size: initialSize,
-    minimumSize: minPossibleSize,
-    center: true,
-    title: "MyuneMusic",
-    titleBarStyle: TitleBarStyle.hidden,
-    // backgroundColor: Colors.transparent, // 让原生窗口背景透明
-  );
+    const minPossibleSize = Size(480, 600);
+    final windowOptions = WindowOptions(
+      size: initialSize,
+      minimumSize: minPossibleSize,
+      center: true,
+      title: "MyuneMusic",
+      titleBarStyle: TitleBarStyle.hidden,
+      // backgroundColor: Colors.transparent, // 让原生窗口背景透明
+    );
 
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
-    // 这一行会导致全屏的时候抖3次
-    // await windowManager.setAsFrameless();
+    windowManager.waitUntilReadyToShow(windowOptions, () async {
+      // 这一行会导致全屏的时候抖3次
+      // await windowManager.setAsFrameless();
 
-    if (!Platform.isLinux) {
-      await windowManager.setHasShadow(true);
-    }
-    // 设置窗口位置
-    final prefs = await SharedPreferences.getInstance();
-    if (prefs.containsKey('window_x') && prefs.containsKey('window_y')) {
-      await windowManager.setPosition(initialPosition);
-    }
-    await windowManager.show();
-    await windowManager.focus();
-  });
+      if (!Platform.isLinux) {
+        await windowManager.setHasShadow(true);
+      }
+      // 设置窗口位置
+      final prefs = await SharedPreferences.getInstance();
+      if (prefs.containsKey('window_x') && prefs.containsKey('window_y')) {
+        await windowManager.setPosition(initialPosition);
+      }
+      await windowManager.show();
+      await windowManager.focus();
+    });
 
-  //  添加监听器 保存窗口大小
-  windowManager.addListener(windowState);
+    //  添加监听器 保存窗口大小
+    windowManager.addListener(windowState);
+  }
 
   final themeProvider = ThemeProvider();
   await themeProvider.initialize();
@@ -160,8 +168,11 @@ void main() async {
     FlutterError.dumpErrorToConsole(details);
   };
 
-  final systemFonts = SystemFonts();
-  await themeProvider.loadCurrentFont(systemFonts);
+  // 系统字体枚举仅桌面可用，Android 跳过（使用内置 MiSans）
+  if (!Platform.isAndroid) {
+    final systemFonts = SystemFonts();
+    await themeProvider.loadCurrentFont(systemFonts);
+  }
 }
 
 class MyApp extends StatefulWidget {
@@ -182,7 +193,9 @@ class _MyAppState extends State<MyApp> with TrayListener {
 
   @override
   void initState() {
-    trayManager.addListener(this);
+    if (!Platform.isAndroid) {
+      trayManager.addListener(this);
+    }
     super.initState();
 
     // 确保窗口已经初始化
@@ -196,9 +209,9 @@ class _MyAppState extends State<MyApp> with TrayListener {
       }
     });
 
-    // 启动时自动检查更新
+    // 启动时自动检查更新（仅桌面，Android 无更新机制）
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _runStartupUpdateCheck();
+      if (!Platform.isAndroid) _runStartupUpdateCheck();
     });
   }
 
@@ -407,7 +420,9 @@ class _MyAppState extends State<MyApp> with TrayListener {
 
   @override
   void dispose() {
-    trayManager.removeListener(this);
+    if (!Platform.isAndroid) {
+      trayManager.removeListener(this);
+    }
     _taskbarPositionSubscription?.cancel();
     _taskbarPlayingSubscription?.cancel();
     _taskbarCompletedSubscription?.cancel();
@@ -474,6 +489,8 @@ class _MyAppState extends State<MyApp> with TrayListener {
           darkTheme: themeProvider.darkThemeData,
           themeMode: themeProvider.themeMode,
           builder: (context, materialAppChild) {
+            // Android 上去掉窗口拖拽缩放与全局快捷键
+            if (Platform.isAndroid) return materialAppChild!;
             return DragToResizeArea(child: Hotkeys(child: materialAppChild!));
           },
 

@@ -95,7 +95,10 @@ class CargoKitPlugin implements Plugin<Project> {
    private Plugin _findFlutterPlugin(Map projects) {
         for (project in projects) {
             for (plugin in project.value.getPlugins()) {
-                if (plugin.class.name == "FlutterPlugin") {
+                // Flutter 3.47 把 FlutterPlugin 移进 com.flutter.gradle 包；
+                // 旧版本仍使用无包名的 FlutterPlugin。
+                if (plugin.class.name == "com.flutter.gradle.FlutterPlugin" ||
+                    plugin.class.name == "FlutterPlugin") {
                     return plugin;
                 }
             }
@@ -132,7 +135,14 @@ class CargoKitPlugin implements Plugin<Project> {
             def jniLibs = project.android.sourceSets.maybeCreate(buildType).jniLibs;
             jniLibs.srcDir(new File(cargoOutputDir))
 
-            def platforms = plugin.getTargetPlatforms().collect()
+            // Flutter 3.47 的 TargetPlatforms 改为 FlutterPluginUtils 静态方法；
+            // 旧版本仍是 FlutterPlugin 实例方法。Groovy 动态调用可同时兼容两者。
+            def platforms
+            try {
+                platforms = com.flutter.gradle.FlutterPluginUtils.getTargetPlatforms(project).collect()
+            } catch (Throwable ignored) {
+                platforms = plugin.getTargetPlatforms().collect()
+            }
 
             // Same thing addFlutterDependencies does in flutter.gradle
             if (buildType == "debug") {

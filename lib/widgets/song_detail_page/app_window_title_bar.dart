@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:provider/provider.dart';
@@ -10,6 +12,8 @@ class AppWindowTitleBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Android 无窗口概念，直接不渲染标题栏（全屏）
+    if (Platform.isAndroid) return const SizedBox.shrink();
     return Container(
       height: 31.0,
       decoration: const BoxDecoration(

@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'tabs/general_tab.dart';
@@ -58,13 +60,15 @@ class _SettingPageState extends State<SettingPage> {
                 isSelected: _selectedIndex == 3,
                 onTap: () => setState(() => _selectedIndex = 3),
               ),
-              _SettingNavItem(
-                index: 4,
-                title: '快捷键',
-                icon: Icons.keyboard_outlined,
-                isSelected: _selectedIndex == 4,
-                onTap: () => setState(() => _selectedIndex = 4),
-              ),
+              // Android 没有全局快捷键；隐藏入口，避免 hotkey_manager 原生调用崩溃。
+              if (!Platform.isAndroid)
+                _SettingNavItem(
+                  index: 4,
+                  title: '快捷键',
+                  icon: Icons.keyboard_outlined,
+                  isSelected: _selectedIndex == 4,
+                  onTap: () => setState(() => _selectedIndex = 4),
+                ),
               _SettingNavItem(
                 index: 5,
                 title: '高级',
@@ -103,6 +107,10 @@ class _SettingPageState extends State<SettingPage> {
                     key: ValueKey('playback_settings'),
                   );
                 case 4:
+                  // Android 上该导航入口已隐藏，兜底返回空白页。
+                  if (Platform.isAndroid) {
+                    return const SizedBox.shrink(key: ValueKey('hotkeys'));
+                  }
                   return const HotkeysTab(key: ValueKey('hotkeys'));
                 case 5:
                   return const AdvancedTab(key: ValueKey('advanced'));
