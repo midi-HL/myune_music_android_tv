@@ -29,6 +29,15 @@
    - 幂等注入 `android.permission.INTERNET`；媒体会话所需的 `FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_MEDIA_PLAYBACK`、`POST_NOTIFICATIONS` 由 `mpv_audio_kit` 的 Manifest 合并带入。
    - 默认使用 Flutter 模板的 debug 签名；四个签名 secrets 齐全时自动切换 `release signingConfig`。
    - 产物：`build/app/outputs/flutter-apk/*.apk`，Artifact 名 `myune-music-android-arm64`。
+   - CI 里还对齐了 vendored cargokit 的 Gradle 9 API、`file_picker 10.2.0` 与 `rust_builder/android` 写死的旧 compileSdk，以及旧插件的 Kotlin JVM target 校验；这些补丁不改变 Dart 依赖树。
+
+## 首个可用构建
+
+- Actions run：`42059743949`，结论 `success`。
+- Artifact：`myune-music-android-arm64`（zip 41,924,493 bytes，SHA-256 `aa71a6765a66acd3c76adb5f3993baf8f15d6e7600eebf91fc51cbb9434515be`）。
+- APK：`app-release.apk`，71 MB；APK SHA-256 `c4db41380117cc3c1100ee7c940a08f12d8c0407298f740c47552452c0ebd4d7`。
+- 签名：`C=US, O=Android, CN=Android Debug`；签名证书 SHA-256 `d3e7832ce1d7f86634e37e90e99dfc5acac30c557dbd82c7fae80996b1691f01`。
+- 下载入口：`https://github.com/midi-HL/myune_music_android/actions/runs/42059743949/artifacts/13432067396`（GitHub 登录后可下载）。
 
 ## 签名
 
