@@ -103,6 +103,38 @@ jobs:
           grep -F "e87688132c2fc1b0960877a59a7b5a535b64917a" pubspec.lock
           grep -F "kotlin.jvm.target.validation.mode=warning" android/gradle.properties
 
+      # file_picker 10.2.0 的 Groovy 脚本写死 compileSdk 34，但它依赖的
+      # AndroidX / lifecycle 2.0.28 的 AAR metadata 要求 compileSdk >= 36。
+      # 只改 pub cache 中该插件的构建脚本，不动 Dart 依赖树。
+      - name: Align legacy plugin compileSdk
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import os
+
+          pub_cache = os.environ.get("PUB_CACHE") or str(Path.home() / ".pub-cache")
+          candidates = list(Path(pub_cache).glob("hosted/*/file_picker-*/android/build.gradle"))
+          if not candidates:
+              raise SystemExit("file_picker android/build.gradle not found in pub cache")
+
+          for gradle in candidates:
+              text = gradle.read_text(encoding="utf-8")
+              patched = text.replace(
+                  "compileSdk 34",
+                  "compileSdk ${ANDROID_COMPILE_SDK}",
+              )
+              if patched != text:
+                  # Gradle 需要 single/double quoted string 才能做环境变量插值。
+                  patched = patched.replace(
+                      "compileSdk ${ANDROID_COMPILE_SDK}",
+                      'compileSdk System.getenv("ANDROID_COMPILE_SDK") as int',
+                  )
+                  gradle.write_text(patched, encoding="utf-8")
+                  print(f"patched {gradle}")
+              else:
+                  print(f"no hardcoded compileSdk 34 in {gradle}")
+          PY
+
       # mpv_audio_kit 的 Manifest 已带 FOREGROUND_SERVICE / POST_NOTIFICATIONS，
       # 这里只补歌词抓取等网络功能需要的 INTERNET。
       - name: Patch AndroidManifest permissions

@@ -29,9 +29,10 @@ android {
         namespace 'com.flutter_rust_bridge.rust_lib_myune_music'
     }
 
-    // Bumping the plugin compileSdkVersion requires all clients of this plugin
-    // to bump the version in their app.
-    compileSdkVersion 33
+    // 与 Flutter runner / mpv_audio_kit 保持同一 compileSdk；
+    // CI 通过 ANDROID_COMPILE_SDK 注入，桌面构建不受影响。
+    def androidCompileSdk = System.getenv("ANDROID_COMPILE_SDK")
+    compileSdkVersion (androidCompileSdk != null ? androidCompileSdk.toInteger() : 33)
 
     // Use the NDK version
     // declared in /android/app/build.gradle file of the Flutter project.
