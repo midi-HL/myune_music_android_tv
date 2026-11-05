@@ -94,10 +94,14 @@ jobs:
               --no-pub .
           fi
           mv pubspec.lock.bak pubspec.lock
+          # file_picker 等旧插件的 Kotlin JVM target 与 Java target 不一致；
+          # KGP 2.4 默认把它升级为 error，降级为 warning 以保留现有依赖树。
+          printf '\nkotlin.jvm.target.validation.mode=warning\n' >> android/gradle.properties
           flutter pub get
           test -f android/app/build.gradle.kts
           grep -F "xiaobaimc/mpv_audio_kit.git" pubspec.lock
           grep -F "e87688132c2fc1b0960877a59a7b5a535b64917a" pubspec.lock
+          grep -F "kotlin.jvm.target.validation.mode=warning" android/gradle.properties
 
       # mpv_audio_kit 的 Manifest 已带 FOREGROUND_SERVICE / POST_NOTIFICATIONS，
       # 这里只补歌词抓取等网络功能需要的 INTERNET。
