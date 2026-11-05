@@ -99,7 +99,8 @@ jobs:
           mv pubspec.lock.bak pubspec.lock
           flutter pub get
           test -f android/app/build.gradle.kts
-          grep -F "url: https://github.com/xiaobaimc/mpv_audio_kit.git" pubspec.lock
+          grep -F "xiaobaimc/mpv_audio_kit.git" pubspec.lock
+          grep -F "e87688132c2fc1b0960877a59a7b5a535b64917a" pubspec.lock
 
       # mpv_audio_kit 的 Manifest 已带 FOREGROUND_SERVICE / POST_NOTIFICATIONS，
       # 这里只补歌词抓取等网络功能需要的 INTERNET。
