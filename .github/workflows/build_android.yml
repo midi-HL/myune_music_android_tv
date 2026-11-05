@@ -67,17 +67,14 @@ jobs:
           echo "ANDROID_NDK_HOME=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=${ANDROID_HOME}/ndk/${ANDROID_NDK_VERSION}" >> "$GITHUB_ENV"
 
-      - name: Install native build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libclang-dev llvm clang cmake ninja-build
-
+      # Android NDK 自带 clang/CMake；runner 镜像也预装 libclang。
+      # 不做 apt-get，避免镜像源阻塞整个构建。
       - name: Print toolchain versions
         run: |
           flutter --version
           rustc --version
           java -version
-          sdkmanager --list_installed | head -30
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --list_installed | head -30
 
       - name: Flutter pub get
         run: flutter pub get
