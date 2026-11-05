@@ -85,7 +85,7 @@ jobs:
       - name: Generate Android runner (if missing)
         run: |
           cp pubspec.lock pubspec.lock.bak
-          if [ ! -d android/app ]; then
+          if [ ! -d android ]; then
             flutter create \
               --platforms=android \
               --org com.midihl \
@@ -96,7 +96,7 @@ jobs:
           mv pubspec.lock.bak pubspec.lock
           # 注入 SAF / ContentResolver 原生通道（目录树选择、持久权限、递归音频枚举）。
           mkdir -p android/app/src/main/kotlin/com/midihl/myune_music_android
-          cp android/MainActivity.kt \
+          cp ci/MainActivity.kt \
             android/app/src/main/kotlin/com/midihl/myune_music_android/MainActivity.kt
           # file_picker 等旧插件的 Kotlin JVM target 与 Java target 不一致；
           # KGP 2.4 默认把它升级为 error，降级为 warning 以保留现有依赖树。
