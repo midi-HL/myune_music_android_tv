@@ -12,6 +12,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:system_fonts/system_fonts.dart';
 import 'package:window_manager/window_manager.dart';
@@ -41,6 +42,15 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   AppLicenses.register();
+
+  if (Platform.isAndroid) {
+    // 隐藏系统状态栏与手势导航条；横屏媒体应用由手势从边缘唤出系统栏。
+    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+  }
 
   // ===== 以下为桌面端专属初始化，Android 上跳过 =====
   if (!Platform.isAndroid) {
@@ -175,6 +185,47 @@ void main() async {
   }
 }
 
+class _AndroidUiScaler extends StatelessWidget {
+  const _AndroidUiScaler({required this.child, required this.scale});
+
+  final Widget child;
+  final double scale;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 在更大的逻辑画布上布局，再整体视觉缩小。这样不需要修改系统 DPI，
+        // 固定的桌面字号/尺寸也会按同一比例变小，且点击坐标随变换一起缩放。
+        final effectiveScale = scale.clamp(0.55, 1.0);
+        final virtualWidth = constraints.maxWidth / effectiveScale;
+        final virtualHeight = constraints.maxHeight / effectiveScale;
+        return SizedBox.expand(
+          child: ClipRect(
+            child: OverflowBox(
+              alignment: Alignment.topLeft,
+              minWidth: virtualWidth,
+              maxWidth: virtualWidth,
+              minHeight: virtualHeight,
+              maxHeight: virtualHeight,
+              child: Transform.scale(
+                scale: effectiveScale,
+                alignment: Alignment.topLeft,
+                transformHitTests: true,
+                child: SizedBox(
+                  width: virtualWidth,
+                  height: virtualHeight,
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -182,7 +233,7 @@ class MyApp extends StatefulWidget {
   State<MyApp> createState() => _MyAppState();
 }
 
-class _MyAppState extends State<MyApp> with TrayListener {
+class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver {
   late PlaylistContentNotifier _playlistNotifier;
   SettingsProvider? _settingsProvider;
   StreamSubscription<Duration>? _taskbarPositionSubscription;
@@ -193,10 +244,12 @@ class _MyAppState extends State<MyApp> with TrayListener {
 
   @override
   void initState() {
-    if (!Platform.isAndroid) {
+    super.initState();
+    if (Platform.isAndroid) {
+      WidgetsBinding.instance.addObserver(this);
+    } else {
       trayManager.addListener(this);
     }
-    super.initState();
 
     // 确保窗口已经初始化
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -213,6 +266,13 @@ class _MyAppState extends State<MyApp> with TrayListener {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!Platform.isAndroid) _runStartupUpdateCheck();
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (Platform.isAndroid && state == AppLifecycleState.resumed) {
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
   }
 
   Future<void> _runStartupUpdateCheck() async {
@@ -420,7 +480,9 @@ class _MyAppState extends State<MyApp> with TrayListener {
 
   @override
   void dispose() {
-    if (!Platform.isAndroid) {
+    if (Platform.isAndroid) {
+      WidgetsBinding.instance.removeObserver(this);
+    } else {
       trayManager.removeListener(this);
     }
     _taskbarPositionSubscription?.cancel();
@@ -489,8 +551,16 @@ class _MyAppState extends State<MyApp> with TrayListener {
           darkTheme: themeProvider.darkThemeData,
           themeMode: themeProvider.themeMode,
           builder: (context, materialAppChild) {
-            // Android 上去掉窗口拖拽缩放与全局快捷键
-            if (Platform.isAndroid) return materialAppChild!;
+            // Android 上去掉窗口拖拽缩放与全局快捷键，并做应用内整体缩放。
+            if (Platform.isAndroid) {
+              final uiScale = context
+                  .watch<SettingsProvider>()
+                  .androidUiScale;
+              return _AndroidUiScaler(
+                scale: uiScale,
+                child: materialAppChild!,
+              );
+            }
             return DragToResizeArea(child: Hotkeys(child: materialAppChild!));
           },
 

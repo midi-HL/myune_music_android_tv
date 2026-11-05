@@ -28,6 +28,7 @@ import '../../services/global_hotkey_manager.dart';
 import '../../services/search_service.dart';
 import '../../services/search_index_store.dart';
 import '../../services/notification_service.dart';
+import '../../services/android_content_resolver.dart';
 import '../../utils/search_debouncer.dart';
 import '../../lyrics/lyrics_handler.dart';
 
@@ -453,7 +454,26 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   // 获取规范化的路径
   String _normalizePath(String path) {
+    // content:// URI 是稳定 ID，不能交给 path 包规范化。
+    if (AndroidContentResolver.isContentUri(path)) return path;
     return p.normalize(path);
+  }
+
+  String _songDisplayName(String path) {
+    if (!AndroidContentResolver.isContentUri(path)) {
+      return p.basenameWithoutExtension(path);
+    }
+    final display = AndroidContentResolver.displayName(path, null);
+    return display.contains('.')
+        ? display.substring(0, display.lastIndexOf('.'))
+        : display;
+  }
+
+  Future<String> _readableAudioPath(String path) async {
+    if (!AndroidContentResolver.isContentUri(path)) {
+      return Uri.file(path).toFilePath(windows: Platform.isWindows);
+    }
+    return AndroidContentResolver.cachePathForRead(path);
   }
 
   // 加载歌曲元数据缓存
@@ -947,17 +967,18 @@ class PlaylistContentNotifier extends ChangeNotifier {
       );
     }
 
-    String title = p.basenameWithoutExtension(filePath);
+    String title = _songDisplayName(filePath);
     String artist = '未知歌手';
     String album = '未知专辑';
     Duration? duration;
 
-    final normalizedPath = Uri.file(
-      filePath,
-    ).toFilePath(windows: Platform.isWindows);
+    final isContentUri = AndroidContentResolver.isContentUri(filePath);
+    final normalizedPath = isContentUri
+        ? await AndroidContentResolver.cachePathForRead(filePath)
+        : Uri.file(filePath).toFilePath(windows: Platform.isWindows);
     final file = File(normalizedPath);
 
-    if (!await file.exists()) {
+    if (!isContentUri && !await file.exists()) {
       return Song(
         title: title,
         artist: '文件不存在 (解析失败)',
@@ -1018,12 +1039,11 @@ class PlaylistContentNotifier extends ChangeNotifier {
   }
 
   Future<AudioInfo?> _readTrackNumberForSort(String filePath) async {
-    final normalizedPath = Uri.file(
-      filePath,
-    ).toFilePath(windows: Platform.isWindows);
+    final normalizedPath = await _readableAudioPath(filePath);
     final file = File(normalizedPath);
 
-    if (!await file.exists()) {
+    if (!AndroidContentResolver.isContentUri(filePath) &&
+        !await file.exists()) {
       return null;
     }
 
@@ -1063,9 +1083,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
     // 只在没有封面的情况下加载元数据
     try {
-      final normalizedPath = Uri.file(
-        filePath,
-      ).toFilePath(windows: Platform.isWindows);
+      final normalizedPath = await _readableAudioPath(filePath);
       final metadata = await readAudioInfo(
         path: normalizedPath,
         options: const AudioInfoOptions(
@@ -1278,9 +1296,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
     for (final filePath in filePaths) {
       final cacheKey = _normalizePath(filePath);
       final cached = _songMetadataCache[cacheKey];
-      final normalizedPath = Uri.file(
-        filePath,
-      ).toFilePath(windows: Platform.isWindows);
+      final normalizedPath = await _readableAudioPath(filePath);
       final file = File(normalizedPath);
 
       try {
@@ -1304,7 +1320,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
         final title = (metadata.title != null && metadata.title!.isNotEmpty)
             ? metadata.title!
-            : p.basenameWithoutExtension(filePath);
+            : _songDisplayName(filePath);
         final artist = (metadata.artist != null && metadata.artist!.isNotEmpty)
             ? metadata.artist!
             : '未知歌手';
@@ -1451,9 +1467,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
       }
       final filePath = cacheKey;
       try {
-        final normalizedPath = Uri.file(
-          filePath,
-        ).toFilePath(windows: Platform.isWindows);
+        final normalizedPath = await _readableAudioPath(filePath);
         final metadata = await readAudioInfo(
           path: normalizedPath,
           options: const AudioInfoOptions(
@@ -1711,7 +1725,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
   Map<String, Set<String>> _buildPathMap(Iterable<String> paths) {
     final map = <String, Set<String>>{};
     for (final fp in paths) {
-      map.putIfAbsent(p.normalize(fp).toLowerCase(), () => {}).add(fp);
+      map.putIfAbsent(_normalizePath(fp).toLowerCase(), () => {}).add(fp);
     }
     return map;
   }
@@ -1729,8 +1743,16 @@ class PlaylistContentNotifier extends ChangeNotifier {
     try {
       final Set<String> songPaths = <String>{};
 
-      // 遍历所有文件夹路径
+      // Android SAF 目录树返回 content URI；桌面仍用 dart:io 递归扫描。
       for (final folderPath in folderPaths) {
+        if (AndroidContentResolver.isContentUri(folderPath)) {
+          final files = await AndroidContentResolver.listAudioFiles(folderPath);
+          for (final file in files) {
+            final uri = file['uri'];
+            if (uri != null) songPaths.add(uri);
+          }
+          continue;
+        }
         final directory = Directory(folderPath);
         if (await directory.exists()) {
           await for (final file
@@ -1752,7 +1774,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
       final diff = _computePathDiff(playlist.songFilePaths, songPaths);
       final addedPaths = diff.added;
       final removedPathsNormalized = diff.removed
-          .map((fp) => p.normalize(fp).toLowerCase())
+          .map((fp) => _normalizePath(fp).toLowerCase())
           .toSet();
 
       // 先解析新增歌曲元数据，确认无异常后再修改 playlist 状态
@@ -1769,7 +1791,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
       // 从现有列表中移除已删除的歌曲
       playlist.songFilePaths.removeWhere(
         (path) =>
-            removedPathsNormalized.contains(p.normalize(path).toLowerCase()),
+            removedPathsNormalized.contains(_normalizePath(path).toLowerCase()),
       );
 
       // 添加新增的歌曲到末尾
@@ -1779,7 +1801,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
       if (playlist.songs != null) {
         playlist.songs!.removeWhere(
           (song) => removedPathsNormalized.contains(
-            p.normalize(song.filePath).toLowerCase(),
+            _normalizePath(song.filePath).toLowerCase(),
           ),
         );
         playlist.songs!.addAll(newSongs);
@@ -1826,6 +1848,14 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
     for (final folderPath in playlist.folderPaths) {
       try {
+        if (AndroidContentResolver.isContentUri(folderPath)) {
+          final files = await AndroidContentResolver.listAudioFiles(folderPath);
+          for (final file in files) {
+            final uri = file['uri'];
+            if (uri != null) songPaths.add(uri);
+          }
+          continue;
+        }
         final directory = Directory(folderPath);
         if (await directory.exists()) {
           await for (final file
@@ -1848,7 +1878,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
     final diff = _computePathDiff(playlist.songFilePaths, songPaths);
     final addedPaths = diff.added;
     final removedPathsNormalized = diff.removed
-        .map((fp) => p.normalize(fp).toLowerCase())
+        .map((fp) => _normalizePath(fp).toLowerCase())
         .toSet();
 
     // 先解析新增歌曲元数据，确认无异常后再修改 playlist 状态
@@ -1863,14 +1893,14 @@ class PlaylistContentNotifier extends ChangeNotifier {
     // 所有解析成功后，统一修改 playlist 状态
     playlist.songFilePaths.removeWhere(
       (path) =>
-          removedPathsNormalized.contains(p.normalize(path).toLowerCase()),
+          removedPathsNormalized.contains(_normalizePath(path).toLowerCase()),
     );
     playlist.songFilePaths.addAll(addedPaths);
 
     if (playlist.songs != null) {
       playlist.songs!.removeWhere(
         (song) => removedPathsNormalized.contains(
-          p.normalize(song.filePath).toLowerCase(),
+          _normalizePath(song.filePath).toLowerCase(),
         ),
       );
       playlist.songs!.addAll(parsedAddedSongs!);
@@ -2143,6 +2173,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
       final invalidPaths = <String>[];
 
       for (final path in playlist.songFilePaths) {
+        if (AndroidContentResolver.isContentUri(path)) continue;
         final file = File(path);
         if (!await file.exists()) {
           invalidPaths.add(path);
@@ -2175,16 +2206,20 @@ class PlaylistContentNotifier extends ChangeNotifier {
       if (targetSet != null && targetSet.isNotEmpty) {
         // 移除指定的文件路径
         removedNormalized = targetSet
-            .map((fp) => p.normalize(fp).toLowerCase())
+            .map((fp) => _normalizePath(fp).toLowerCase())
             .toSet();
         playlist.songFilePaths = playlist.songFilePaths.where((path) {
-          return !removedNormalized.contains(p.normalize(path).toLowerCase());
+          return !removedNormalized.contains(_normalizePath(path).toLowerCase());
         }).toList();
       } else if (filesToRemove == null) {
         // 未提供过滤条件时，移除所有不存在的文件（兼容旧行为）
         final updatedPaths = <String>[];
         final removedPaths = <String>[];
         for (final path in playlist.songFilePaths) {
+          if (AndroidContentResolver.isContentUri(path)) {
+            updatedPaths.add(path);
+            continue;
+          }
           final file = File(path);
           if (await file.exists()) {
             updatedPaths.add(path);
@@ -2194,7 +2229,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
         }
         playlist.songFilePaths = updatedPaths;
         removedNormalized = removedPaths
-            .map((fp) => p.normalize(fp).toLowerCase())
+            .map((fp) => _normalizePath(fp).toLowerCase())
             .toSet();
       } else {
         continue;
@@ -2206,7 +2241,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
         if (playlist.songs != null) {
           playlist.songs!.removeWhere(
             (song) => removedNormalized.contains(
-              p.normalize(song.filePath).toLowerCase(),
+              _normalizePath(song.filePath).toLowerCase(),
             ),
           );
         }
@@ -3514,9 +3549,14 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
         // 将歌曲加载到播放器中，但不自动播放
         try {
-          // 检查文件是否存在
-          final songFile = File(songFilePath);
-          if (await songFile.exists()) {
+          // content:// 由 mpv_audio_kit 的 fd 通道打开；本地路径仍检查文件存在。
+          final isContentUri = AndroidContentResolver.isContentUri(
+            songFilePath,
+          );
+          if (isContentUri ||
+              await File(
+                Uri.file(songFilePath).toFilePath(windows: Platform.isWindows),
+              ).exists()) {
             await _audioService.player.open(
               Media(songFilePath),
               play: false, // 不自动播放
@@ -4224,10 +4264,10 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
     // 过滤掉已经存在的路径
     final existingSet = targetPlaylist.songFilePaths
-        .map((fp) => p.normalize(fp).toLowerCase())
+        .map((fp) => _normalizePath(fp).toLowerCase())
         .toSet();
     final newPaths = songPaths
-        .where((path) => !existingSet.contains(p.normalize(path).toLowerCase()))
+        .where((path) => !existingSet.contains(_normalizePath(path).toLowerCase()))
         .toList();
 
     if (newPaths.isEmpty) return 0;
@@ -4272,11 +4312,11 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
       final targetPlaylist = _playlists[index];
       final existingSet = targetPlaylist.songFilePaths
-          .map((fp) => p.normalize(fp).toLowerCase())
+          .map((fp) => _normalizePath(fp).toLowerCase())
           .toSet();
       final newPaths = songPaths
           .where(
-            (path) => !existingSet.contains(p.normalize(path).toLowerCase()),
+            (path) => !existingSet.contains(_normalizePath(path).toLowerCase()),
           )
           .toList();
 
@@ -4320,12 +4360,11 @@ class PlaylistContentNotifier extends ChangeNotifier {
     }
 
     final filePath = targetSong.filePath;
-    final normalizedPath = Uri.file(
-      filePath,
-    ).toFilePath(windows: Platform.isWindows);
+    final normalizedPath = await _readableAudioPath(filePath);
     final file = File(normalizedPath);
 
-    if (!await file.exists()) {
+    if (!AndroidContentResolver.isContentUri(filePath) &&
+        !await file.exists()) {
       // _notificationService.error('歌曲文件不存在：${p.basename(filePath)}');
       return SongDetails(
         title: '文件不存在',
@@ -4353,7 +4392,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
       final Uint8List? albumArtBytes = metadata.cover;
 
       return SongDetails(
-        title: metadata.title ?? p.basenameWithoutExtension(filePath),
+        title: metadata.title ?? _songDisplayName(filePath),
         artist: metadata.artist ?? '未知歌手',
         album: metadata.album ?? '未知专辑',
         duration: metadata.durationMs != null

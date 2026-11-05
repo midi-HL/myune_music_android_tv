@@ -2,7 +2,7 @@
 
 本仓库是 `github.com/xiaobaimc/myune_music` 的 Android 移植工作副本。上游是 Flutter 3.47.5 / Dart 3.10 的 Windows / Linux 桌面本地音乐播放器，原本没有 `android/` 目录。所有 Android 编译都在 GitHub Actions 完成，本地不需要 Flutter / Rust / NDK。
 
-当前目标是**先产出可安装的 arm64-v8a APK，供真机验证启动与出声链路**。SAF 音乐库改造、触屏体验打磨还未完成，见下文「未完成」。
+首个 arm64-v8a APK 已通过真机验证：启动、导入、播放、后台媒体控制均正常。第二轮按真机反馈补齐沉浸式全屏、应用内缩放、SAF 目录树、content URI 播放/元数据、触屏 hover 回退与横屏双栏；待新一轮真机复验。
 
 ## 当前已完成的改造
 
@@ -22,7 +22,22 @@
    - 优先调用 `FlutterPluginUtils.getTargetPlatforms(project)`；旧 Flutter 仍回退到 `plugin.getTargetPlatforms()`。
    - 不修这一步，cargokit 会静默跳过 `librust_lib_myune_music.so`，`RustLib.init()` 在真机上会失败。
 
-5. **`.github/workflows/build_android.yml`**
+5. **沉浸式全屏与应用内缩放**
+   - Android 启动和 `AppLifecycleState.resumed` 时应用 `SystemUiMode.immersiveSticky`，隐藏状态栏与手势导航条。
+   - `MaterialApp.builder` 在 Android 用 `_AndroidUiScaler` 把整棵 UI 布局在更大的逻辑画布后整体缩小；默认 `0.72`，设置 → 常规 → 「界面缩放」可调 `0.55–1.00`，不改系统 DPI。
+   - 桌面平台完全保持原布局。
+
+6. **SAF 音乐库与 content URI**
+   - `android/MainActivity.kt` 在 CI 生成 runner 后注入 `ACTION_OPEN_DOCUMENT_TREE`、持久化 URI 权限、递归音频枚举和字节读取通道。
+   - `lib/services/android_content_resolver.dart` 是 Dart 侧唯一 SAF 适配层；Android 的「添加音乐目录」改用目录树授权，歌单 `folderPaths` 与歌曲 ID 可保存 `content://` URI。
+   - 播放端由 `mpv_audio_kit` 的 `openFileDescriptor` 把 `content://` 转成 `fd://`；元数据读取则把音频缓存到应用私有临时文件后交给现有 Rust `readAudioInfo`，避免修改 FRB 生成代码。
+   - 外置同目录 `.lrc` 的 SAF 关联、ReplayGain 写回仍按桌面路径语义处理；内嵌歌词、封面、时长、播放恢复已覆盖。
+
+7. **触屏与横屏布局**
+   - `HoverOverlayControl` 在 Android 点击展开浮层且不自动消失；音量浮层提供横向 Slider 与 +/- 按钮。
+   - `MainView` 在宽屏横屏下把歌曲详情固定为右栏 detail pane，窄屏保持原 Navigator 行为。
+
+8. **`.github/workflows/build_android.yml`**
    - 固定 Flutter `3.47.5` / Java 21；其默认 compileSdk 36、minSdk 24、NDK `28.2.13676358` 与 `mpv_audio_kit` 锁定 commit 的要求一致。
    - 用 `flutter create --platforms=android --org com.midihl --project-name myune_music_android` 生成固定 applicationId 的 runner；备份/恢复 `pubspec.lock`，因为 Flutter 3.47.5 的 `create` 会把它重写为只含 SDK 依赖的空壳。
    - 只构建 `android-arm64`，收窄 Rust 交叉编译、libmpv 下载和真机测试的变量。
@@ -61,15 +76,20 @@
 5. 锁屏、通知栏或蓝牙耳机媒体键能控制播放，切到后台继续播放。
 6. 记录设备型号、Android 版本、APK 签名者 SHA-256、通过 / 失败项。
 
-## 未完成（下一阶段）
+## 第二轮真机复验清单
 
-- **Phase 3：SAF 音乐库访问（最大难点）**
-  - 桌面端用 `dart:io` 绝对路径递归扫描；Android 需 `ACTION_OPEN_DOCUMENT_TREE` + 持久化 URI 权限 + `DocumentFile` 递归。
-  - `Playlist.songFilePaths` 要从「文件路径」变成可解析为 fd 的 SAF URI；歌单持久化、封面缓存、搜索索引、统计页等约 15 个文件都消费该字段。
-  - 播放端用 `mpv_audio_kit` 的 `FileDescriptorChannel` 把 `content://` 转成 fd；Rust 元数据读取也要能接受 fd / 字节流，不能直接 `File(path)`。
-- **Phase 4：触屏体验**
-  - `hover_overlay_control` 等 hover 依赖加点击回退；平板横屏双栏 master-detail 可选。
-  - 全面核查桌面专属设置项、字体扫描、文件路径、更新检查在 Android 的可见性与回退行为。
+1. 状态栏、手势导航条是否默认隐藏；从边缘滑动可临时唤出，回到 App 后再次自动隐藏。
+2. 界面默认缩放是否合适；设置 → 常规 → 「界面缩放」拖动后是否即时生效并在重启后保留。
+3. 横屏宽屏下右侧是否固定显示歌曲详情；竖屏/窄窗口是否保持原行为。
+4. 点击音量图标是否展开可触屏操作的 Slider / +/-；再次点击是否收起。
+5. 添加音乐目录是否弹出系统目录授权；授权后递归扫描 `content://` 音频，重启 App 后仍可播放。
+6. 原有真机测试项回归：点歌出声、暂停/继续/切歌、锁屏/通知栏/蓝牙控制、切后台续播。
+
+## 已知限制
+
+- 外置同目录 `.lrc` 的 SAF 关联、ReplayGain 写回、按修改日期排序对 `content://` 的精确时间支持仍需后续增强；当前优先保证音频读取、元数据与播放链路。
+- 应用内缩放是视觉层 `Transform.scale` + 逻辑画布，不替换各页面的硬编码尺寸；极窄设备可继续调低 `android_ui_scale`。
+- 宽屏双栏是主导航层 master-detail，歌单页内部已有自己的横屏列表双栏；两者叠加时以当前页面的响应式判断为准。
 
 ## 已知风险
 

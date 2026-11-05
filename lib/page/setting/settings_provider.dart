@@ -63,6 +63,7 @@ class SettingsProvider with ChangeNotifier {
   static const _enableGaplessPlaybackKey = 'enableGaplessPlayback';
   static const _autoHidePlayPageComponentsKey = 'autoHidePlayPageComponents';
   static const _autoCheckUpdatesKey = 'autoCheckUpdates'; // 启动时自动检查更新设置的 key
+  static const _androidUiScaleKey = 'android_ui_scale';
 
   static const _enableCustomBackgroundKey =
       'enableCustomBackground'; // 自定义背景图开关
@@ -101,6 +102,7 @@ class SettingsProvider with ChangeNotifier {
   bool _enableGaplessPlayback = false; // 默认不启用无缝播放
   bool _autoHidePlayPageComponents = false; // 默认不自动隐藏部分组件
   bool _autoCheckUpdates = true; // 默认启用启动时自动检查更新
+  double _androidUiScale = 0.72; // Android 默认按桌面布局缩小到 72%
 
   bool _enableCustomBackground = false; // 默认不启用自定义背景图
   String? _customBackgroundPath; // 自定义背景图文件路径
@@ -131,6 +133,7 @@ class SettingsProvider with ChangeNotifier {
 
   int get maxLinesPerLyric => _maxLinesPerLyric;
   double get fontSize => _fontSize;
+  double get androidUiScale => _androidUiScale;
   TextAlign get lyricAlignment => _lyricAlignment;
   bool get useBlurBackground => _useBlurBackground; // 获取模糊背景设置
   bool get useDynamicColor => _useDynamicColor; // 获取动态颜色设置
@@ -219,6 +222,10 @@ class SettingsProvider with ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _maxLinesPerLyric = prefs.getInt(_prefsKey) ?? 2;
     _fontSize = prefs.getDouble(_fontSizeKey) ?? 20.0;
+    _androidUiScale = (prefs.getDouble(_androidUiScaleKey) ?? 0.72).clamp(
+      0.55,
+      1.0,
+    );
     _useBlurBackground = prefs.getBool(_useBlurBackgroundKey) ?? true;
     _useDynamicColor = prefs.getBool(_useDynamicColorKey) ?? true; // 加载动态颜色设置
     _allowAnyFormat = prefs.getBool(_allowAnyFormatKey) ?? false; // 加载允许任何格式设置
@@ -531,6 +538,15 @@ class SettingsProvider with ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_autoHidePlayPageComponentsKey, value);
+  }
+
+  void setAndroidUiScale(double value) async {
+    final clamped = value.clamp(0.55, 1.0);
+    if (_androidUiScale == clamped) return;
+    _androidUiScale = clamped;
+    notifyListeners();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_androidUiScaleKey, clamped);
   }
 
   void setAutoCheckUpdates(bool value) async {

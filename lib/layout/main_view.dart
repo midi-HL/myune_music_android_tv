@@ -179,6 +179,68 @@ class _MainViewState extends State<MainView> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
+        // 横屏宽屏时把歌曲详情固定成右栏，形成 master-detail。
+        // 窄屏仍走原来的单 Navigator，不叠加第三层列表。
+        final isWideLandscape =
+            constraints.maxWidth >= 1100 &&
+            MediaQuery.of(context).orientation == Orientation.landscape;
+        if (isWideLandscape) {
+          return Row(
+            children: [
+              SafeArea(
+                child: NavigationRail(
+                  backgroundColor: CustomBackgroundSurfaces.railColor(
+                    settings,
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
+                  ),
+                  selectedIndex: currentIndex,
+                  onDestinationSelected: (int index) {
+                    switch (visibleEntries[index].page) {
+                      case Playlist _:
+                        playlistNotifier.clearActiveDetailView();
+                        break;
+                      case AllSongs _:
+                        playlistNotifier.setActiveAllSongsView();
+                        break;
+                      case SongDetails _:
+                        playlistNotifier.clearViewingSong();
+                        break;
+                    }
+                    if (currentIndex != index) {
+                      navigationNotifier.navigateTo(
+                        visibleEntries[index].routeName,
+                      );
+                    }
+                  },
+                  destinations: [
+                    for (int i = 0; i < visibleEntries.length; i++)
+                      _buildDest(visibleEntries[i], i, currentIndex),
+                  ],
+                ),
+              ),
+              Expanded(
+                flex: 3,
+                child: Navigator(
+                  key: navigationNotifier.navigatorKey,
+                  onGenerateRoute: (settings) {
+                    final entry = visibleEntries.firstWhere(
+                      (e) => e.routeName == settings.name,
+                      orElse: () => visibleEntries.first,
+                    );
+                    return PageRouteBuilder(
+                      pageBuilder: (context, _, __) => entry.page,
+                      transitionDuration: Duration.zero,
+                      reverseTransitionDuration: Duration.zero,
+                      transitionsBuilder: (context, _, __, child) => child,
+                    );
+                  },
+                ),
+              ),
+              const VerticalDivider(width: 1),
+              const SizedBox(width: 420, child: SongDetails()),
+            ],
+          );
+        }
         return Row(
           children: [
             SafeArea(

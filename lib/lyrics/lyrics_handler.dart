@@ -10,6 +10,7 @@ import '../page/playlist/playlist_models.dart';
 import '../page/setting/settings_provider.dart';
 import '../src/rust/api/audio_info.dart';
 import '../services/notification_service.dart';
+import '../services/android_content_resolver.dart';
 
 import 'decryptor/krc_decryptor.dart';
 import 'decryptor/lyric_encryption_detector.dart';
@@ -266,12 +267,13 @@ class LyricsHandler {
   // 加载内嵌歌词
   Future<void> _loadEmbeddedLyrics(String songFilePath) async {
     try {
-      final normalizedPath = Uri.file(
-        songFilePath,
-      ).toFilePath(windows: Platform.isWindows);
+      final isContentUri = AndroidContentResolver.isContentUri(songFilePath);
+      final normalizedPath = isContentUri
+          ? await AndroidContentResolver.cachePathForRead(songFilePath)
+          : Uri.file(songFilePath).toFilePath(windows: Platform.isWindows);
       final file = File(normalizedPath);
 
-      if (!await file.exists()) {
+      if (!isContentUri && !await file.exists()) {
         _notificationService.error('歌曲文件不存在：${p.basename(songFilePath)}');
         _notifyListeners();
         return;

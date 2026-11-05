@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:silky_scroll/silky_scroll.dart';
 import '../../theme/scroll_config.dart';
 
+import '../../services/android_content_resolver.dart';
 import 'playlist_content_notifier.dart';
 import 'playlist_models.dart';
 import '../../widgets/sort_dialog.dart';
@@ -360,10 +361,12 @@ class _FolderManagementWidgetState extends State<_FolderManagementWidget> {
           children: [
             ElevatedButton.icon(
               onPressed: () async {
-                final folder = await FilePicker.platform.getDirectoryPath(
-                  dialogTitle: '请选择文件夹',
-                  lockParentWindow: true,
-                );
+                final folder = Platform.isAndroid
+                    ? await AndroidContentResolver.pickDirectoryTree()
+                    : await FilePicker.platform.getDirectoryPath(
+                        dialogTitle: '请选择文件夹',
+                        lockParentWindow: true,
+                      );
                 if (folder != null) {
                   if (!widget.selectedFolders.contains(folder)) {
                     setState(() {
@@ -374,18 +377,20 @@ class _FolderManagementWidgetState extends State<_FolderManagementWidget> {
                 }
               },
               icon: const Icon(Icons.folder_open),
-              label: const Text('添加文件夹'),
+              label: Text(Platform.isAndroid ? '添加音乐目录' : '添加文件夹'),
             ),
-            const SizedBox(width: 8),
-            ElevatedButton.icon(
-              onPressed: () {
-                setState(() {
-                  _showPathInput = !_showPathInput;
-                });
-              },
-              icon: Icon(_showPathInput ? Icons.expand_less : Icons.input),
-              label: const Text('输入路径'),
-            ),
+            if (!Platform.isAndroid) ...[
+              const SizedBox(width: 8),
+              ElevatedButton.icon(
+                onPressed: () {
+                  setState(() {
+                    _showPathInput = !_showPathInput;
+                  });
+                },
+                icon: Icon(_showPathInput ? Icons.expand_less : Icons.input),
+                label: const Text('输入路径'),
+              ),
+            ],
           ],
         ),
         if (_showPathInput) ...[

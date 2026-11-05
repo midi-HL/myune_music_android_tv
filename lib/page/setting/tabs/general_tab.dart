@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -132,6 +134,39 @@ class _GeneralTabState extends State<GeneralTab> {
       children: [
         // 主题配色选择
         const ThemeSelectionScreen(),
+        if (Platform.isAndroid)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text('界面缩放', style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(width: 8),
+                    Text(
+                      '${(settings.androidUiScale * 100).round()}%',
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+                Slider(
+                  min: 0.55,
+                  max: 1.0,
+                  divisions: 9,
+                  value: settings.androidUiScale,
+                  label: '${(settings.androidUiScale * 100).round()}%',
+                  onChanged: (value) {
+                    context.read<SettingsProvider>().setAndroidUiScale(value);
+                  },
+                ),
+                Text(
+                  '仅影响应用内布局，不改系统 DPI；越小显示内容越多',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ),
+          ),
         // 检查更新按钮
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),

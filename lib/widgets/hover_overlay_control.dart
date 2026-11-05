@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
@@ -70,6 +72,8 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
 
   void _setHovering(bool hovering) {
     if (!mounted) return;
+    // Android 上浮层由点击展开，不能因 MouseRegion 的离开事件自动消失。
+    if (Platform.isAndroid) return;
     _isHovering = hovering;
     if (!hovering) {
       Future.delayed(const Duration(milliseconds: 100), () {
@@ -99,6 +103,7 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
         },
         child: MouseRegion(
           onEnter: (_) {
+            if (Platform.isAndroid) return;
             _setHovering(true);
             _showOverlay();
           },
@@ -111,12 +116,21 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
               size: widget.size,
             ),
             onPressed: () {
+              // 触屏没有 hover：第一次点击先展开浮层，浮层内提供具体控件。
+              if (Platform.isAndroid && _overlayEntry == null) {
+                _showOverlay();
+                return;
+              }
               // 如果外部传入了点击事件的处理函数
               if (widget.onIconPressed != null) {
                 // 先执行外部的函数
                 widget.onIconPressed!();
-                // 再主动刷新浮层，以确保UI同步
-                _overlayEntry?.markNeedsBuild();
+                // 浮层展开后再次点击收起，否则只刷新浮层状态。
+                if (Platform.isAndroid) {
+                  _removeOverlay();
+                } else {
+                  _overlayEntry?.markNeedsBuild();
+                }
               } else {
                 // 如果外部没有传入处理函数，就执行默认逻辑
                 if (_overlayEntry == null) {

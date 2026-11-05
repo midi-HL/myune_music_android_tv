@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
@@ -63,7 +65,9 @@ class VolumeControlState extends State<VolumeControl> {
           onIconPressed: playlistNotifier.toggleMute,
           onPointerSignal: (event) => _handleScroll(event, playlistNotifier),
           overlayOffset: const Offset(0, -170),
-          overlayConstraints: const BoxConstraints(maxWidth: 40),
+          overlayConstraints: BoxConstraints(
+            maxWidth: Platform.isAndroid ? 180 : 40,
+          ),
           overlayContentBuilder: (context) {
             return _buildOverlayContent(playlistNotifier);
           },
@@ -73,6 +77,42 @@ class VolumeControlState extends State<VolumeControl> {
   }
 
   Widget _buildOverlayContent(PlaylistContentNotifier playlistNotifier) {
+    if (Platform.isAndroid) {
+      return Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  onPressed: () => playlistNotifier.setVolume(
+                    (playlistNotifier.volume - 5).clamp(0.0, 100.0),
+                  ),
+                  icon: const Icon(Icons.remove),
+                ),
+                Expanded(
+                  child: Slider(
+                    min: 0,
+                    max: 100,
+                    value: playlistNotifier.volume,
+                    onChanged: (value) => playlistNotifier.setVolume(value),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => playlistNotifier.setVolume(
+                    (playlistNotifier.volume + 5).clamp(0.0, 100.0),
+                  ),
+                  icon: const Icon(Icons.add),
+                ),
+              ],
+            ),
+            Text('${playlistNotifier.volume.round()}%'),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Column(
