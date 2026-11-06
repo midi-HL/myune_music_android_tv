@@ -68,22 +68,27 @@ class AndroidScaleCompensator extends StatelessWidget {
   Widget build(BuildContext context) {
     final scale = AndroidUiScaleScope.maybeOf(context);
     if (scale == null || scale >= 1.0) return child;
-    return OverflowBox(
-      alignment: Alignment.topLeft,
-      minWidth: MediaQuery.of(context).size.width / scale,
-      maxWidth: MediaQuery.of(context).size.width / scale,
-      minHeight: MediaQuery.of(context).size.height / scale,
-      maxHeight: MediaQuery.of(context).size.height / scale,
-      child: Transform.scale(
-        scale: 1.0 / scale,
-        alignment: Alignment.topLeft,
-        transformHitTests: true,
-        child: SizedBox(
-          width: MediaQuery.of(context).size.width,
-          height: MediaQuery.of(context).size.height,
-          child: child,
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 全局缩放把逻辑尺寸放大到 screen/scale；播放页会再按 MediaQuery
+        // 面积计算自己的 scale。这里恢复真实屏幕尺寸，避免二次缩小。
+        final physical = Size(
+          constraints.maxWidth * scale,
+          constraints.maxHeight * scale,
+        );
+        return OverflowBox(
+          alignment: Alignment.topLeft,
+          minWidth: physical.width,
+          maxWidth: physical.width,
+          minHeight: physical.height,
+          maxHeight: physical.height,
+          child: SizedBox(
+            width: physical.width,
+            height: physical.height,
+            child: child,
+          ),
+        );
+      },
     );
   }
 }
