@@ -172,7 +172,31 @@ PY
 
 ### 9.2 本轮重新编译产物
 
-> 占位：推送回档到 `558a71f` 后重新编译，CI 完成后回填 Actions run、两个 matrix job 的结论、Artifact ID / 下载入口、zip / APK 大小与 SHA-256、签名证书 SHA-256、`.so` 清单。
+- 代码提交：`a921a74` `Revert to 07:13 baseline and rebuild dual ABI APKs`。
+- Actions run：`42234763869`，结论 `success`。
+  - `build (arm64-v8a, android-arm64, myune-music-android-arm64)`：`success`，2026-11-06T14:32:06Z → 14:41:27Z。
+  - `build (armeabi-v7a, android-arm, myune-music-android-armv7)`：`success`，2026-11-06T14:32:06Z → 14:41:59Z。
+- CI annotation 只有 Node.js 20 / `setup-java@v4` / Ubuntu 26 迁移提示，与构建结果无关。
+
+#### arm64-v8a / 64 位
+
+- Artifact：`myune-music-android-arm64`，ID `13512820441`
+- 下载：`https://github.com/midi-HL/myune_music_android/actions/runs/42234763869/artifacts/13512820441`
+- zip：41,922,469 bytes，SHA-256 `55cb0610189a3ee7c145db2ba02a244b1a51942160b291fb5458a53406b5eaad`
+- APK：`myune-music-arm64-v8a-release.apk`，73,754,354 bytes，SHA-256 `d84964810c23dd485de199237ac41f773b4f4bd32ae80fd846c3843bfa935c5e`
+- 签名：`C=US, O=Android, CN=Android Debug`；证书 SHA-256 `7c1d21854b3372ec87c4b33cf9f1793a28b1ce71858f9a6d892202a71d510082`
+- 已核对 `lib/arm64-v8a/libmpv.so`（8,318,304 bytes）与 `lib/arm64-v8a/librust_lib_myune_music.so`（1,900,736 bytes）
+
+#### armeabi-v7a / 32 位
+
+- Artifact：`myune-music-android-armv7`，ID `13511561424`
+- 下载：`https://github.com/midi-HL/myune_music_android/actions/runs/42234763869/artifacts/13511561424`
+- zip：41,361,216 bytes，SHA-256 `486c0c0515743ad59c4f62a882fa5af2193763e70c5e62978ac169389f73426c`
+- APK：`myune-music-armeabi-v7a-release.apk`，71,231,224 bytes，SHA-256 `06eb7ab50d151d8b5da85f9de1ccf8cb1652028c2fa6a451b32e105450e6b3af`
+- 签名：`C=US, O=Android, CN=Android Debug`；证书 SHA-256 `4235f6f574b8819e3f7549c312f53640db62e86b85446fe65ba9fee0a76ba0e4`
+- 已核对 `lib/armeabi-v7a/libmpv.so`（8,171,192 bytes）与 `lib/armeabi-v7a/librust_lib_myune_music.so`（1,267,884 bytes）
+
+两个包均为 debug 签名。每个 matrix runner 独立生成 debug keystore，两个 ABI 的证书不同；覆盖安装遇到签名冲突时先卸载旧测试包。
 
 上一轮 `42226182533` 编译的是 `a28f2c9` + 双 ABI workflow，不是本次目标版本；其 Artifact 不作为本轮交付依据。
 
