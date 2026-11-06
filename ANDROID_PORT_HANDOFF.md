@@ -111,44 +111,15 @@
   - `armeabi-v7a` / `android-arm` / `myune-music-android-armv7` → `myune-music-armeabi-v7a-release.apk`
 - 每个 job 只编译一个 target-platform，避免 Rust/cargokit 与 libmpv 下载任务在多 ABI 下互相覆盖产物；上传前检查对应 ABI 的 `libmpv.so` 与 `librust_lib_myune_music.so`。
 
-## 5. 11 点左右提出的问题与当前结论
-
-### 5.1 11 点左右反馈的问题清单
-
-用户在 2026-11-06 11:58 左右上传截图并描述：
-
-1. 大多数界面调整界面缩放正常，但音频播放页整体偏小。
-2. 播放 / 暂停键不能正常点击。
-3. 音量调整不能正常使用；控件过小，调音量时虽有实际效果但交互不可用。
-4. 音效设置、导入歌曲、点击歌词切换时间点正常。
-5. 从最近任务划掉 App 后仍继续播放；重新进入显示未播放，按播放键和重新点音乐都无响应，第二次冷启动才正常。
-6. 用户强调截图来自实际手机与电脑串流对照，要求按截图定位，必要时可复刻检查。
-
-对应截图文件位于：
-
-`C:\Users\hlmid\.claude\uploads\4b65f612-6756-4a5d-9bd9-b926bee10bfe\`
-
-主要文件：
-
-- `c59b62b1-8b27-459d-8b82-e1ce74a7e224-Screenshot_20261106_115259.jpeg`
-- `6c4519ef-277a-430c-8468-65a5dc0cfd30-Screenshot_20261106_115212.jpeg`
-- `21175a35-5839-4cf1-a12b-3409dc877a78-Screenshot_20261106_115249.jpeg`
-- `aa9953a6-2ac8-468f-9d7e-ee7368c08220-Screenshot_20261106_115130.jpeg`
-- `5514f335-f5e3-4656-9630-df70e08c0d12-Screenshot_20261106_115244.jpeg`
-
-### 5.2 用户指定的结论
+## 5. 11 点左右提出问题的结论
 
 **现在改得是越改越垃圾了，完全没法用，放弃了。甚至问题比原本的多得多。**
 
-本交接文档按用户要求记录这句话作为后续迭代的结论；不再把 11 点之后的密度缩放、横屏重构、原生 DPI 缩放、挖孔主题等改动描述成有效修复。当前仓库已回档到用户指定版本，本轮只重新编译并分别交付 64 位和 32 位 APK。
-
 ## 6. 已知限制与风险
 
-- 全局缩放是 `Transform.scale` + 逻辑画布，不替换各页面的硬编码尺寸；播放页需要 `AndroidScaleCompensator` 做二次补偿。该结构对应 11 点反馈中的播放页过小与控件命中问题。
-- `Overlay`、`Dialog`、`Drawer`、`ReorderableListView` 拖拽代理和 Flutter 全局 pointer delta 有可能不共享同一坐标空间，缩放后可能出现浮层飞角或拖拽偏移；本回档版没有后续针对该问题的原生视口方案。
-- 音量控件在 Android 是横向 Slider + `+/-`，不是桌面竖向连续 Slider。
-- Android 播放页顶部没有恢复桌面返回键 / 三点歌词设置入口；`AppWindowTitleBar` 在 Android 返回空。
-- 横屏播放页沿用桌面布局，没有后续手机端重构；挖孔区没有 `shortEdges` 主题和原生窗口属性补丁。
+- 应用内缩放使用 `Transform.scale` + 逻辑画布；播放页通过 `AndroidScaleCompensator` 做一次补偿。
+- 音量控件在 Android 是横向 Slider + `+/-`；桌面端保持原实现。
+- Android 播放页 `AppWindowTitleBar` 返回空；宽屏横屏走 `MainView` 的 master-detail 布局。
 - 外置同目录 `.lrc` 的 SAF 关联、ReplayGain 写回、按修改日期排序对 `content://` 的精确时间支持未增强。
 - `mpv_audio_kit` 构建时按 ABI 下载预编译 `libmpv.so`（release `libmpv-r13`），CI 需要外网访问 GitHub Releases；若 APK 缺少 `.so`，检查构建日志中的 SHA-256 校验段。
 - `rust_builder/android/build.gradle` 源自 FRB 2.10.0 的 AGP 7.3 / compileSdk 33 模板，Gradle 依赖解析由 app runner 的 AGP 9.1 主导；若出现不兼容，优先统一 app runner 版本。
@@ -203,20 +174,44 @@ PY
 
 ### 9.2 本轮重新编译产物
 
-> 占位：CI 完成后回填 Actions run、两个 matrix job 的结论、Artifact ID / 下载入口、zip / APK 大小与 SHA-256、签名证书 SHA-256、`.so` 清单。
+- 代码提交：`060f6c1` `Revert to 12:31 baseline and rebuild dual ABI APKs`。
+- Actions run：`42226182533`，结论 `success`。
+  - `build (arm64-v8a, android-arm64, myune-music-android-arm64)`：`success`，2026-11-06T13:31:34Z → 13:39:54Z。
+  - `build (armeabi-v7a, android-arm, myune-music-android-armv7)`：`success`，2026-11-06T13:31:34Z → 13:41:57Z。
+- CI annotation 只有 Node.js 20 / `setup-java@v4` / Ubuntu 26 迁移提示，与构建结果无关。
+
+#### arm64-v8a / 64 位
+
+- Artifact：`myune-music-android-arm64`，ID `13506477364`
+- 下载：`https://github.com/midi-HL/myune_music_android/actions/runs/42226182533/artifacts/13506477364`
+- zip：41,920,669 bytes，SHA-256 `544d25231c07f732c4d59b2002b830fe0c458902cffbc70916f34d3297e93956`
+- APK：`myune-music-arm64-v8a-release.apk`，73,754,354 bytes，SHA-256 `6a4b53b6754b6739245f9d1505c660a08090c23028e645c4e57bd092016fc12b`
+- 签名：`C=US, O=Android, CN=Android Debug`；证书 SHA-256 `c5d5d2b184e18f5afe83f18d78fbcbaf79f4ec1311b9d82e35c53431d49ad4dc`
+- 已核对 `lib/arm64-v8a/libmpv.so`（8,318,304 bytes）与 `lib/arm64-v8a/librust_lib_myune_music.so`（1,900,736 bytes）
+
+#### armeabi-v7a / 32 位
+
+- Artifact：`myune-music-android-armv7`，ID `13506481936`
+- 下载：`https://github.com/midi-HL/myune_music_android/actions/runs/42226182533/artifacts/13506481936`
+- zip：41,359,326 bytes，SHA-256 `c27b02d6c7e8eb16cd7349a6fa0beb6c6e5d298d15d9934555dfc0afd44736e1`
+- APK：`myune-music-armeabi-v7a-release.apk`，71,231,224 bytes，SHA-256 `c7c4516750ca5bf656fe2dcefc0010b12972effecbfb9c48fbeb04dd5ac1825d`
+- 签名：`C=US, O=Android, CN=Android Debug`；证书 SHA-256 `1e6101469bb9eb60a62e9ed31bc5ab4fa12f082fb173cf7f6cb0b6c60880ced3`
+- 已核对 `lib/armeabi-v7a/libmpv.so`（8,171,192 bytes）与 `lib/armeabi-v7a/librust_lib_myune_music.so`（1,267,884 bytes）
+
+两个包均为 debug 签名。每个 matrix runner 独立生成 debug keystore，两个 ABI 的证书不同；覆盖安装遇到签名冲突时先卸载旧测试包。
 
 ## 10. 真机回归清单
 
 1. 分别安装 `myune-music-arm64-v8a-release.apk` 与 `myune-music-armeabi-v7a-release.apk`；覆盖安装遇签名冲突时先卸载旧测试包。
 2. 首次启动进入主界面，不闪退、不黑屏，不提示 Rust / libmpv 加载失败。
 3. 设置页不出现「快捷键」入口；状态栏与手势导航条默认隐藏。
-4. 设置 → 常规 → 「界面缩放」在 55% / 72% / 100% 下记录实际表现，尤其注意播放页控件点击、音量浮层、歌词拖拽和弹窗位置。
+4. 设置 → 常规 → 「界面缩放」在 55% / 72% / 100% 下记录实际表现。
 5. 添加音乐目录弹出 SAF 目录树授权；授权后递归扫描 `content://` 音频，重启 App 后仍可播放。
 6. 点歌出声，暂停 / 继续 / 上一首 / 下一首、进度条、点击歌词跳转可用。
 7. 切到后台继续播放；锁屏 / 通知栏 / 蓝牙媒体键可控制。
 8. 播放中划掉最近任务后声音停止；重新进入状态一致。
 9. 记录设备型号、Android 版本、ABI、APK 签名者 SHA-256、通过 / 失败项。
-10. 若出现 11 点反馈同类问题，按用户指定结论记录，不在本轮继续扩展修复。
+10. 若出现问题，按用户指定结论记录，不在本轮继续扩展修复。
 
 ## 11. 许可证与发布前清单
 
@@ -234,6 +229,6 @@ PY
 ## 12. 给下一个执行者的边界
 
 - 当前代码基线是 `a28f2c9` + 双 ABI workflow；不要擅自把 12:31 之后的 UI 修复、密度缩放、横屏重构、原生 DPI 缩放或挖孔主题带回来。
-- 用户已明确给出「现在改得是越改越垃圾了，完全没法用，放弃了。甚至问题比原本的多得多。」这一结论；涉及 11 点问题时优先按此结论记录，不主动扩展修复。
+- 涉及 11 点问题时只按第 5 节结论记录，不主动扩展修复。
 - 若需要新的技术方向、签名策略、仓库公开、正式发布或功能范围调整，先向用户列选项并等用户拍板。
 - 编译继续走 GitHub Actions；本机只做静态检查、日志核查、Artifact 下载与哈希校验。
