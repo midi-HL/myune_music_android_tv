@@ -1,95 +1,38 @@
 import 'package:flutter/material.dart';
 
-class AndroidUiScaleScope extends InheritedWidget {
-  const AndroidUiScaleScope({required this.scale, required super.child});
-
-  final double scale;
-
-  static double? maybeOf(BuildContext context) {
-    return context
-        .dependOnInheritedWidgetOfExactType<AndroidUiScaleScope>()
-        ?.scale;
-  }
-
-  @override
-  bool updateShouldNotify(AndroidUiScaleScope oldWidget) =>
-      oldWidget.scale != scale;
-}
-
+/// Android 应用内密度调节。
+///
+/// 不包裹 Transform、不修改 MediaQuery.size / devicePixelRatio / viewInsets：
+/// 那些值分别决定布局尺寸、物理像素换算与系统安全区，改动会造成黑边、
+/// 拖拽浮层坐标漂移和命中错位。这里只通过 Navigator 上方的 Theme 与文本
+/// 缩放影响所有页面、Dialog、Drawer 和 Overlay。
 class AndroidUiScaler extends StatelessWidget {
-  const AndroidUiScaler({required this.child, required this.scale});
+  const AndroidUiScaler({required this.child, required this.scale, super.key});
 
   final Widget child;
   final double scale;
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 在更大的逻辑画布上布局，再整体视觉缩小。这样不需要修改系统 DPI，
-        // 固定的桌面字号/尺寸也会按同一比例变小，且点击坐标随变换一起缩放。
-        final effectiveScale = scale.clamp(0.55, 1.0);
-        final virtualWidth = constraints.maxWidth / effectiveScale;
-        final virtualHeight = constraints.maxHeight / effectiveScale;
-        return SizedBox.expand(
-          child: ClipRect(
-            child: OverflowBox(
-              alignment: Alignment.topLeft,
-              minWidth: virtualWidth,
-              maxWidth: virtualWidth,
-              minHeight: virtualHeight,
-              maxHeight: virtualHeight,
-              child: Transform.scale(
-                scale: effectiveScale,
-                alignment: Alignment.topLeft,
-                transformHitTests: true,
-                child: SizedBox(
-                  width: virtualWidth,
-                  height: virtualHeight,
-                  child: AndroidUiScaleScope(scale: effectiveScale, child: child),
-                ),
-              ),
-            ),
-          ),
-        );
-      },
+    final effectiveScale = scale.clamp(0.85, 1.15);
+    final media = MediaQuery.of(context);
+    final theme = Theme.of(context);
+    final densityOffset = (effectiveScale - 1.0) * 2.0;
+    final scaledTheme = theme.copyWith(
+      visualDensity: VisualDensity(
+        horizontal: densityOffset,
+        vertical: densityOffset,
+      ),
+    );
+
+    return Theme(
+      data: scaledTheme,
+      child: MediaQuery(
+        data: media.copyWith(
+          textScaler: TextScaler.linear(effectiveScale),
+        ),
+        child: child,
+      ),
     );
   }
 }
-
-/// 对已经自行按窗口尺寸计算 scale 的全屏页面（如播放页）撤销一次全局缩放，
-/// 避免两次 scale 叠加导致元素过小、命中区域与视觉位置错位。
-class AndroidScaleCompensator extends StatelessWidget {
-  const AndroidScaleCompensator({required this.child});
-
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
-    final scale = AndroidUiScaleScope.maybeOf(context);
-    if (scale == null || scale >= 1.0) return child;
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // 全局缩放把逻辑尺寸放大到 screen/scale；播放页会再按 MediaQuery
-        // 面积计算自己的 scale。这里恢复真实屏幕尺寸，避免二次缩小。
-        final physical = Size(
-          constraints.maxWidth * scale,
-          constraints.maxHeight * scale,
-        );
-        return OverflowBox(
-          alignment: Alignment.topLeft,
-          minWidth: physical.width,
-          maxWidth: physical.width,
-          minHeight: physical.height,
-          maxHeight: physical.height,
-          child: SizedBox(
-            width: physical.width,
-            height: physical.height,
-            child: child,
-          ),
-        );
-      },
-    );
-  }
-}
-

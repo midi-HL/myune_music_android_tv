@@ -2,7 +2,7 @@
 
 本仓库是 `github.com/xiaobaimc/myune_music` 的 Android 移植工作副本。上游是 Flutter 3.47.5 / Dart 3.10 的 Windows / Linux 桌面本地音乐播放器，原本没有 `android/` 目录。所有 Android 编译都在 GitHub Actions 完成，本地不需要 Flutter / Rust / NDK。
 
-首个 arm64-v8a APK 已通过真机验证：启动、导入、播放、后台媒体控制均正常。随后按真机反馈补齐沉浸式全屏、应用内缩放、SAF 目录树、content URI 播放/元数据、触屏 hover 回退与横屏双栏；第三轮又修复播放页二次缩放、播放/音量控件命中、竖屏方向锁定、竖屏歌词过小，以及划掉后台任务后媒体会话状态错位。
+首个 arm64-v8a APK 已通过真机验证：启动、导入、播放、后台媒体控制均正常。随后按真机反馈补齐沉浸式全屏、应用内密度、SAF 目录树、content URI 播放/元数据、触屏 hover 回退与横屏双栏；后续又修复后台任务状态、竖屏方向、竖屏歌词过小，并按第四轮视频/截图反馈删除会导致黑边与拖拽错位的 Transform 缩放，恢复播放页顶部导航、歌词设置抽屉与桌面一致的竖向音量条。CI 现在同时输出 arm64-v8a 与 armeabi-v7a 两个单 ABI APK。
 
 ## 当前已完成的改造
 
@@ -12,7 +12,7 @@
    - 系统字体枚举 `SystemFonts` 与启动更新检查在 Android 跳过；保留 `MpvAudioKit.ensureInitialized()` 与 `RustLib.init()`。
 
 2. **窗口标题栏**
-   - 两个 `AppWindowTitleBar` 在 Android 返回 `SizedBox.shrink()`，去掉桌面窗口边框。
+   - 通用标题栏在 Android 隐藏；播放页标题栏保留返回键与三点按钮，仅去掉窗口拖动区、最小化/全屏/关闭等桌面窗口按钮。三点按钮打开「歌词显示设置」抽屉。
 
 3. **设置页快捷键 tab**
    - `lib/page/setting/setting_page.dart` 在 Android 隐藏「快捷键」导航项，并为 `case 4` 加空白页兜底。这样不会触达 `hotkey_manager` 的桌面原生 API 和 `HotKeyRecorder` 键盘录制 UI。
@@ -22,9 +22,9 @@
    - 优先调用 `FlutterPluginUtils.getTargetPlatforms(project)`；旧 Flutter 仍回退到 `plugin.getTargetPlatforms()`。
    - 不修这一步，cargokit 会静默跳过 `librust_lib_myune_music.so`，`RustLib.init()` 在真机上会失败。
 
-5. **沉浸式全屏与应用内缩放**
+5. **沉浸式全屏与应用内密度**
    - Android 启动和 `AppLifecycleState.resumed` 时应用 `SystemUiMode.immersiveSticky`，隐藏状态栏与手势导航条。
-   - `MaterialApp.builder` 在 Android 用 `_AndroidUiScaler` 把整棵 UI 布局在更大的逻辑画布后整体缩小；默认 `0.72`，设置 → 常规 → 「界面缩放」可调 `0.55–1.00`，不改系统 DPI。
+   - `MaterialApp.builder` 在 Android 用 `AndroidUiScaler` 调整 `TextScaler` 与 `visualDensity`；默认 `100%`，设置 → 常规 → 「文字与控件密度」可调 `85–115%`。画面始终铺满屏幕，不改 `MediaQuery.size`、系统 DPI 或物理像素比，避免黑边和拖拽浮层坐标漂移。
    - 桌面平台完全保持原布局。
 
 6. **SAF 音乐库与 content URI**
@@ -34,27 +34,29 @@
    - 外置同目录 `.lrc` 的 SAF 关联、ReplayGain 写回仍按桌面路径语义处理；内嵌歌词、封面、时长、播放恢复已覆盖。
 
 7. **触屏与横屏布局**
-   - `HoverOverlayControl` 在 Android 点击展开浮层且不自动消失；音量浮层提供横向 Slider 与 +/- 按钮。
+   - `HoverOverlayControl` 在 Android 点击展开浮层、点击外部或再次点图标关闭；音量浮层与桌面一致，是连续竖向 Slider。
+   - 歌词来源优先级弹窗在窄屏自动收窄，并使用 48dp 触屏拖拽把手与长按拖拽。
    - `MainView` 在宽屏横屏下把歌曲详情固定为右栏 detail pane，窄屏保持原 Navigator 行为。
 
 8. **`.github/workflows/build_android.yml`**
    - 固定 Flutter `3.47.5` / Java 21；其默认 compileSdk 36、minSdk 24、NDK `28.2.13676358` 与 `mpv_audio_kit` 锁定 commit 的要求一致。
    - 用 `flutter create --platforms=android --org com.midihl --project-name myune_music_android` 生成固定 applicationId 的 runner；备份/恢复 `pubspec.lock`，因为 Flutter 3.47.5 的 `create` 会把它重写为只含 SDK 依赖的空壳。
-   - 只构建 `android-arm64`，收窄 Rust 交叉编译、libmpv 下载和真机测试的变量。
+   - 使用 matrix 分别构建 `android-arm64` 与 `android-arm`，每次只编译一个 target-platform，避免 Rust/cargokit 与 libmpv 下载任务在多 ABI 下互相覆盖产物。
    - 幂等注入 `android.permission.INTERNET`；媒体会话所需的 `FOREGROUND_SERVICE`、`FOREGROUND_SERVICE_MEDIA_PLAYBACK`、`POST_NOTIFICATIONS` 由 `mpv_audio_kit` 的 Manifest 合并带入。
    - 默认使用 Flutter 模板的 debug 签名；四个签名 secrets 齐全时自动切换 `release signingConfig`。
-   - 产物：`build/app/outputs/flutter-apk/*.apk`，Artifact 名 `myune-music-android-arm64`。
+   - 产物：`myune-music-arm64-v8a-release.apk` / `myune-music-armeabi-v7a-release.apk`，Artifact 名分别为 `myune-music-android-arm64` / `myune-music-android-armv7`。
    - CI 里还对齐了 vendored cargokit 的 Gradle 9 API、`file_picker 10.2.0` 与 `rust_builder/android` 写死的旧 compileSdk，以及旧插件的 Kotlin JVM target 校验；这些补丁不改变 Dart 依赖树。
 
 ## 当前可用构建
 
-- Actions run：`42163020869`，结论 `success`。
-- Artifact：`myune-music-android-arm64`（zip 41,920,631 bytes，SHA-256 `19831cb83b03a1d36d967efb31dfe5c60c771e8b012967f5673cd242594fd0f1`）。
-- APK：`app-release.apk`，71 MB；APK SHA-256 `ae86e5c0bd8f58a03201dabccf5a617a579e19a6c2a17e736cae3540ca47bd0f`。
-- 签名：`C=US, O=Android, CN=Android Debug`；签名证书 SHA-256 `8ba7875e63ea3a45aa959d8b3147978dd6b6d8959a31cb7ed9d21e88679a30ce`。
-- 下载入口：`https://github.com/midi-HL/myune_music_android/actions/runs/42163020869/artifacts/13478795058`（GitHub 登录后可下载）。
+当前源码包含第四轮修复，等待本次 GitHub Actions 构建结果；下面的成功 run 是修复前的历史构建，仅作为基线，不应再用于真机复验。
 
-历史构建：`42059743949` 验证启动与播放链路，`42126221458` 加入全屏/缩放/SAF/触屏适配；当前 APK 额外修复播放页二次缩放、竖屏方向、竖屏歌词尺寸与杀后台状态。
+- 历史 Actions run：`42163020869`，结论 `success`。
+- 历史 Artifact：`myune-music-android-arm64`（zip 41,920,631 bytes，SHA-256 `19831cb83b03a1d36d967efb31dfe5c60c771e8b012967f5673cd242594fd0f1`）。
+- 历史 APK：`app-release.apk`，71 MB；APK SHA-256 `ae86e5c0bd8f58a03201dabccf5a617a579e19a6c2a17e736cae3540ca47bd0f`。
+- 历史签名：`C=US, O=Android, CN=Android Debug`；签名证书 SHA-256 `8ba7875e63ea3a45aa959d8b3147978dd6b6d8959a31cb7ed9d21e88679a30ce`。
+
+历史构建：`42059743949` 验证启动与播放链路，`42126221458` 加入全屏/SAF/触屏适配，`42163020869` 是第四轮反馈前的基线。本次构建完成后以新的两个 ABI Artifact 为准。
 
 ## 签名
 
@@ -78,21 +80,22 @@
 5. 锁屏、通知栏或蓝牙耳机媒体键能控制播放，切到后台继续播放。
 6. 记录设备型号、Android 版本、APK 签名者 SHA-256、通过 / 失败项。
 
-## 第三轮真机复验清单
+## 第四轮真机复验清单
 
-1. 横屏、竖屏都可自由旋转；竖屏播放页歌词和控件明显更大、不再沿用桌面窄窗口比例。
-2. 播放页不再被全局缩放二次缩小；播放/暂停、上一首/下一首、进度条、音量 Slider / +/- 都能正常点击。
-3. 状态栏、手势导航条默认隐藏；从边缘滑动可临时唤出，回到 App 后再次自动隐藏。
-4. 设置 → 常规 → 「界面缩放」对列表/设置页仍生效；播放页不再受它二次影响。
-5. 横屏宽屏下右侧固定显示歌曲详情；竖屏保持单栏大歌词布局。
-6. 播放中划掉最近任务后声音停止；重新打开 App 状态一致，按播放或重新点歌立即响应，无需第二次冷启动。
-7. 添加音乐目录弹出系统目录授权；授权后递归扫描 `content://` 音频，重启 App 后仍可播放。
-8. 回归：点歌出声、歌词点击跳转、暂停/继续/切歌、锁屏/通知栏/蓝牙控制、切后台续播。
+1. 设置 → 常规 → 「文字与控件密度」在 85% / 100% / 115% 下都铺满屏幕，不出现小画面、黑边、拖拽浮层飞角或点击错位。
+2. 播放页顶部有返回键和三点按钮；三点打开「歌词显示设置」抽屉，字号、字重、间距、模糊强度可调整并生效。
+3. 音量按钮展开桌面同款竖向连续 Slider；点击外部、再次点图标可关闭；拖动音量实时变化。
+4. 横屏播放页与电脑端截图接近：封面/进度/控制按钮占左栏，歌词占右栏，控件不再过小；竖屏仍可自由旋转，歌词明显放大。
+5. 歌词来源优先级长按拖拽把手后条目在列表内移动，重置/取消/确定都正常。
+6. 高级页「清理无效文件」可选择全部歌单，能识别 SAF 授权撤销后的失效 `content://` 条目；「刷新所有文件夹歌单」在授权失效时报错而不清空歌单。
+7. 添加音乐目录、SAF 递归扫描、歌曲显示名、封面/时长/内嵌歌词、重启后播放、删除歌单/歌曲/目录、打开文件、长按菜单、ReplayGain 对 SAF 歌曲明确失败均逐项回归。
+8. 播放中划掉最近任务后声音停止；重新打开 App 状态一致；后台播放、锁屏/通知栏/蓝牙控制、歌词点击跳转、音效设置保持正常。
+9. 分别安装 `arm64-v8a` 与 `armeabi-v7a` 包，确认对应设备能启动、加载 `libmpv.so` 和 `librust_lib_myune_music.so`、正常出声。
 
 ## 已知限制
 
-- 外置同目录 `.lrc` 的 SAF 关联、ReplayGain 写回、按修改日期排序对 `content://` 的精确时间支持仍需后续增强；当前优先保证音频读取、元数据与播放链路。
-- 应用内缩放是视觉层 `Transform.scale` + 逻辑画布，不替换各页面的硬编码尺寸；极窄设备可继续调低 `android_ui_scale`。
+- 外置同目录 `.lrc` 的 SAF 关联、ReplayGain 写回、按修改日期排序对 `content://` 的精确时间支持仍需后续增强；ReplayGain 写回对 SAF 文档会明确记为失败，不会把 `content://` 当本地路径写坏。
+- 应用内密度只影响文字和部分 Material 控件，不缩放硬编码的封面/画布尺寸；播放页仍按真实屏幕尺寸计算自己的布局。
 - 宽屏双栏是主导航层 master-detail，歌单页内部已有自己的横屏列表双栏；两者叠加时以当前页面的响应式判断为准。
 
 ## 已知风险

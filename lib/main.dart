@@ -513,7 +513,7 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
           darkTheme: themeProvider.darkThemeData,
           themeMode: themeProvider.themeMode,
           builder: (context, materialAppChild) {
-            // Android 上去掉窗口拖拽缩放与全局快捷键，并做应用内整体缩放。
+            // Android 上去掉窗口拖拽缩放与全局快捷键，只调整应用内密度。
             if (Platform.isAndroid) {
               final uiScale = context
                   .watch<SettingsProvider>()

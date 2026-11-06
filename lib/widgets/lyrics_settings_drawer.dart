@@ -27,6 +27,9 @@ class LyricsSettingsDrawer extends StatelessWidget {
     final settings = context.watch<SettingsProvider>();
 
     return Drawer(
+      width: MediaQuery.of(context).size.width < 600
+          ? MediaQuery.of(context).size.width
+          : 360,
       child: SafeArea(
         child: SingleChildScrollView(
           child: Padding(

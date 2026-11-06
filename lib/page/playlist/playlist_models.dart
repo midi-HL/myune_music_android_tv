@@ -20,7 +20,9 @@ class Song {
     this.albumArt,
     this.duration,
     this.trackNumber,
-  }) : normalizedPath = p.normalize(filePath);
+  }) : normalizedPath = filePath.startsWith('content://')
+          ? filePath
+          : p.normalize(filePath);
 
   Map<String, dynamic> toJson() {
     return {'title': title, 'artist': artist, 'filePath': filePath};

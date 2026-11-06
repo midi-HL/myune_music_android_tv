@@ -49,6 +49,31 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
+                "exists" -> {
+                    val uri = call.argument<String>("uri")
+                    if (uri == null) {
+                        result.error("INVALID", "uri is null", null)
+                    } else {
+                        result.success(documentExists(Uri.parse(uri)))
+                    }
+                }
+                "viewDocument" -> {
+                    val uri = call.argument<String>("uri")
+                    if (uri == null) {
+                        result.error("INVALID", "uri is null", null)
+                    } else {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(Uri.parse(uri), "audio/*")
+                                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                            }
+                            startActivity(intent)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("VIEW_FAILED", e.message, null)
+                        }
+                    }
+                }
                 else -> result.notImplemented()
             }
         }
@@ -87,7 +112,10 @@ class MainActivity : FlutterActivity() {
                 Intent.FLAG_GRANT_WRITE_URI_PERMISSION
         ))
         try {
-            contentResolver.takePersistableUriPermission(uri, takeFlags)
+            // ACTION_OPEN_DOCUMENT_TREE 返回的是读授权；只请求实际持有的 flags，
+            // 避免某些 DocumentsProvider 因 WRITE 未授予而拒绝持久化。
+            val persistFlags = takeFlags and Intent.FLAG_GRANT_READ_URI_PERMISSION
+            contentResolver.takePersistableUriPermission(uri, persistFlags)
             result.success(uri.toString())
         } catch (e: Exception) {
             result.error("PERMISSION_FAILED", e.message, null)
@@ -104,25 +132,30 @@ class MainActivity : FlutterActivity() {
             )
         )
         val audioExtensions = setOf(
-            "wav", "wady", "wavarc", "flac", "alac", "ape", "mp3", "aac",
-            "m4a", "ogg", "opus", "wma", "aiff", "pcm",
+            "mp3", "flac", "wav", "aac", "m4a", "ogg", "wma", "ape",
+            "alac", "opus", "aiff", "aif", "wady", "wavarc", "pcm",
         )
         val seen = HashSet<String>()
         var visited = 0
         while (queue.isNotEmpty() && visited < 20000) {
             val childrenUri = queue.removeFirst()
-            val cursor = contentResolver.query(
-                childrenUri,
-                arrayOf(
-                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
-                    DocumentsContract.Document.COLUMN_DISPLAY_NAME,
-                    DocumentsContract.Document.COLUMN_MIME_TYPE,
-                    DocumentsContract.Document.COLUMN_LAST_MODIFIED,
-                ),
-                null,
-                null,
-                null,
-            ) ?: continue
+            val cursor = try {
+                contentResolver.query(
+                    childrenUri,
+                    arrayOf(
+                        DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                        DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                        DocumentsContract.Document.COLUMN_MIME_TYPE,
+                        DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+                        DocumentsContract.Document.COLUMN_SIZE,
+                    ),
+                    null,
+                    null,
+                    null,
+                ) ?: throw IllegalStateException("无法枚举目录：$childrenUri")
+            } catch (e: Exception) {
+                throw IllegalStateException("SAF 目录读取失败：$childrenUri (${e.message})", e)
+            }
             cursor.use { c ->
                 while (c.moveToNext() && visited < 20000) {
                     visited++
@@ -148,6 +181,7 @@ class MainActivity : FlutterActivity() {
                                     "displayName" to name,
                                     "mimeType" to mime,
                                     "lastModified" to modified.toString(),
+                                    "size" to (getLong(c, DocumentsContract.Document.COLUMN_SIZE) ?: 0L).toString(),
                                 )
                             )
                         }
@@ -156,6 +190,14 @@ class MainActivity : FlutterActivity() {
             }
         }
         return out
+    }
+
+    private fun documentExists(uri: Uri): Boolean {
+        return try {
+            contentResolver.openInputStream(uri)?.use { true } ?: false
+        } catch (_: Exception) {
+            false
+        }
     }
 
     private fun readBytes(uri: Uri, maxBytes: Int): ByteArray {

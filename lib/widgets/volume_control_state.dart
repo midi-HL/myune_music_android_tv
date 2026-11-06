@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
@@ -24,11 +22,6 @@ class VolumeControl extends StatefulWidget {
 }
 
 class VolumeControlState extends State<VolumeControl> {
-  @override
-  void initState() {
-    super.initState();
-  }
-
   // 处理滚轮事件，增加/减少音量
   void _handleScroll(
     PointerSignalEvent event,
@@ -64,73 +57,38 @@ class VolumeControlState extends State<VolumeControl> {
           size: widget.size,
           onIconPressed: playlistNotifier.toggleMute,
           onPointerSignal: (event) => _handleScroll(event, playlistNotifier),
-          overlayOffset: const Offset(0, -170),
-          overlayConstraints: BoxConstraints(
-            maxWidth: Platform.isAndroid ? 180 : 40,
+          overlayOffset: const Offset(-12, -190),
+          overlayConstraints: const BoxConstraints(
+            maxWidth: 64,
+            maxHeight: 220,
           ),
           overlayContentBuilder: (context) {
-            return _buildOverlayContent(playlistNotifier);
+            return _buildOverlayContent();
           },
         );
       },
     );
   }
 
-  Widget _buildOverlayContent(PlaylistContentNotifier playlistNotifier) {
-    if (Platform.isAndroid) {
-      return Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  onPressed: () => playlistNotifier.setVolume(
-                    (playlistNotifier.volume - 5).clamp(0.0, 100.0),
-                  ),
-                  icon: const Icon(Icons.remove),
-                ),
-                Expanded(
-                  child: Slider(
-                    min: 0,
-                    max: 100,
-                    value: playlistNotifier.volume,
-                    onChanged: (value) => playlistNotifier.setVolume(value),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => playlistNotifier.setVolume(
-                    (playlistNotifier.volume + 5).clamp(0.0, 100.0),
-                  ),
-                  icon: const Icon(Icons.add),
-                ),
-              ],
-            ),
-            Text('${playlistNotifier.volume.round()}%'),
-          ],
-        ),
-      );
-    }
+  Widget _buildOverlayContent() {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            width: 40,
-            height: 120,
+            width: 52,
+            height: 150,
             child: RotatedBox(
               quarterTurns: -1, // 横向滑块旋转成垂直显示
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
-                  trackHeight: 6,
+                  trackHeight: 8,
                   thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 8,
+                    enabledThumbRadius: 10,
                   ),
                   overlayShape: const RoundSliderOverlayShape(
-                    overlayRadius: 12,
+                    overlayRadius: 18,
                   ),
                 ),
                 child: Consumer<PlaylistContentNotifier>(
@@ -154,7 +112,7 @@ class VolumeControlState extends State<VolumeControl> {
               return Text(
                 '${(notifier.volume).round()}',
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: FontWeight.w500,
                 ),
               );

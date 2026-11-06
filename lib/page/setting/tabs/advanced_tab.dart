@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -95,20 +97,21 @@ class AdvancedTab extends StatelessWidget {
             context.read<SettingsProvider>().setAllowAnyFormat(value);
           },
         ),
-        // 允许最小化到托盘
-        SwitchListTile(
-          title: const Row(
-            children: [
-              Text('允许最小化到托盘'),
-              SizedBox(width: 4),
-              InfoIcon('启用后点击最小化按钮将最小化到系统托盘'),
-            ],
+        // 最小化到托盘是桌面窗口功能，Android 无托盘也不渲染最小化按钮。
+        if (!Platform.isAndroid)
+          SwitchListTile(
+            title: const Row(
+              children: [
+                Text('允许最小化到托盘'),
+                SizedBox(width: 4),
+                InfoIcon('启用后点击最小化按钮将最小化到系统托盘'),
+              ],
+            ),
+            value: settings.minimizeToTray,
+            onChanged: (value) {
+              context.read<SettingsProvider>().setMinimizeToTray(value);
+            },
           ),
-          value: settings.minimizeToTray,
-          onChanged: (value) {
-            context.read<SettingsProvider>().setMinimizeToTray(value);
-          },
-        ),
         // 忽略某些播放错误
         SwitchListTile(
           title: const Row(

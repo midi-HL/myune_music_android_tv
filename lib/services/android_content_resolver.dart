@@ -55,8 +55,13 @@ class AndroidContentResolver {
     if (!await cacheDir.exists()) {
       await cacheDir.create(recursive: true);
     }
-    final hash = uri.hashCode.abs().toRadixString(16);
-    final file = File(p.join(cacheDir.path, '$hash.audio'));
+    final name = displayName(uri, null);
+    final extension = p.extension(name).toLowerCase();
+    // Lofty 会根据文件扩展名选择解析器；统一 .audio 会让 FLAC/MP3 等格式识别失败。
+    final suffix = extension.isNotEmpty && extension.length <= 6
+        ? extension
+        : '.mp3';
+    final file = File(p.join(cacheDir.path, '${uri.hashCode.abs()}$suffix'));
     final bytes = await readBytes(uri);
     if (bytes == null || bytes.isEmpty) {
       throw StateError('无法读取 content URI: $uri');
@@ -65,11 +70,56 @@ class AndroidContentResolver {
     return file.path;
   }
 
+  /// 用 content URI 检查 SAF 文档是否仍可读取；用于清理失效文件。
+  static Future<bool> exists(String uri) async {
+    if (!isContentUri(uri)) return File(uri).exists();
+    final result = await _channel.invokeMethod<bool>('exists', {'uri': uri});
+    return result ?? false;
+  }
+
+  /// 用系统文件管理器/音频应用打开 SAF 文档，替代桌面端「显示文件」。
+  static Future<void> viewDocument(String uri) async {
+    if (!isContentUri(uri)) return;
+    await _channel.invokeMethod<void>('viewDocument', {'uri': uri});
+  }
+
+  /// 从已保存的歌单 JSON 中读取 content URI 的显示名。
+  /// SAF 扫描结果会写入 _contentDisplayNames，重启后仍可用于标题回退。
+  static final Map<String, String> _contentDisplayNames = {};
+
+  static void rememberDisplayName(String uri, String? displayName) {
+    if (!isContentUri(uri) || displayName == null || displayName.isEmpty) return;
+    _contentDisplayNames[uri] = displayName;
+  }
+
   static String displayName(String uri, Map<String, String>? metadata) {
-    final name = metadata?['displayName'];
+    final name = metadata?['displayName'] ?? _contentDisplayNames[uri];
     if (name != null && name.isNotEmpty) return name;
-    final last = uri.split('/').lastWhere((part) => part.isNotEmpty, orElse: () => uri);
+    final last = uri
+        .split('/')
+        .lastWhere((part) => part.isNotEmpty, orElse: () => uri);
     final decoded = Uri.tryParse(last)?.pathSegments.lastOrNull ?? last;
     return decoded;
+  }
+
+  static String displayNameWithoutExtension(String uri) {
+    final name = displayName(uri, null);
+    return name.contains('.')
+        ? name.substring(0, name.lastIndexOf('.'))
+        : name;
+  }
+
+  /// SAF 扫描结果写入歌单文件时，把 URI → 显示名一起保存，供重启后恢复。
+  static Map<String, String> displayNameStorage() =>
+      Map.unmodifiable(_contentDisplayNames);
+
+  static void restoreDisplayNames(Map<dynamic, dynamic> saved) {
+    _contentDisplayNames.clear();
+    saved.forEach((key, value) {
+      final uri = key.toString();
+      if (isContentUri(uri) && value != null) {
+        _contentDisplayNames[uri] = value.toString();
+      }
+    });
   }
 }

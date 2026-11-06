@@ -463,10 +463,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
     if (!AndroidContentResolver.isContentUri(path)) {
       return p.basenameWithoutExtension(path);
     }
-    final display = AndroidContentResolver.displayName(path, null);
-    return display.contains('.')
-        ? display.substring(0, display.lastIndexOf('.'))
-        : display;
+    return AndroidContentResolver.displayNameWithoutExtension(path);
   }
 
   Future<String> _readableAudioPath(String path) async {
@@ -893,6 +890,9 @@ class PlaylistContentNotifier extends ChangeNotifier {
   // --- 歌单相关 ---
 
   Future<void> _loadPlaylists() async {
+    AndroidContentResolver.restoreDisplayNames(
+      await _playlistManager.loadContentDisplayNames(),
+    );
     final List<Playlist> loadedPlaylists = await _playlistManager
         .loadPlaylists();
     _playlists = loadedPlaylists;
@@ -909,7 +909,10 @@ class PlaylistContentNotifier extends ChangeNotifier {
   }
 
   Future<void> _savePlaylists() async {
-    await _playlistManager.savePlaylists(_playlists);
+    await _playlistManager.savePlaylists(
+      _playlists,
+      contentDisplayNames: AndroidContentResolver.displayNameStorage(),
+    );
   }
 
   void setSelectedIndex(int index) {
@@ -976,6 +979,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
     final normalizedPath = isContentUri
         ? await AndroidContentResolver.cachePathForRead(filePath)
         : Uri.file(filePath).toFilePath(windows: Platform.isWindows);
+
     final file = File(normalizedPath);
 
     if (!isContentUri && !await file.exists()) {
@@ -1749,7 +1753,13 @@ class PlaylistContentNotifier extends ChangeNotifier {
           final files = await AndroidContentResolver.listAudioFiles(folderPath);
           for (final file in files) {
             final uri = file['uri'];
-            if (uri != null) songPaths.add(uri);
+            if (uri != null) {
+              AndroidContentResolver.rememberDisplayName(
+                uri,
+                file['displayName'],
+              );
+              songPaths.add(uri);
+            }
           }
           continue;
         }
@@ -1847,31 +1857,34 @@ class PlaylistContentNotifier extends ChangeNotifier {
     final Set<String> songPaths = <String>{};
 
     for (final folderPath in playlist.folderPaths) {
-      try {
-        if (AndroidContentResolver.isContentUri(folderPath)) {
-          final files = await AndroidContentResolver.listAudioFiles(folderPath);
-          for (final file in files) {
-            final uri = file['uri'];
-            if (uri != null) songPaths.add(uri);
+      if (AndroidContentResolver.isContentUri(folderPath)) {
+        // SAF 枚举失败必须向上抛出，否则会被当成空目录并误删整张歌单。
+        final files = await AndroidContentResolver.listAudioFiles(folderPath);
+        for (final file in files) {
+          final uri = file['uri'];
+          if (uri != null) {
+            AndroidContentResolver.rememberDisplayName(
+              uri,
+              file['displayName'],
+            );
+            songPaths.add(uri);
           }
-          continue;
         }
-        final directory = Directory(folderPath);
-        if (await directory.exists()) {
-          await for (final file
-              in directory
-                  .list(recursive: true, followLinks: false)
-                  .handleError((_) {})) {
-            if (file is File) {
-              final extension = p.extension(file.path).toLowerCase();
-              if (_supportedAudioExtensions.contains(extension)) {
-                songPaths.add(p.normalize(file.path));
-              }
+        continue;
+      }
+      final directory = Directory(folderPath);
+      if (await directory.exists()) {
+        await for (final file
+            in directory
+                .list(recursive: true, followLinks: false)
+                .handleError((_) {})) {
+          if (file is File) {
+            final extension = p.extension(file.path).toLowerCase();
+            if (_supportedAudioExtensions.contains(extension)) {
+              songPaths.add(p.normalize(file.path));
             }
           }
         }
-      } catch (e) {
-        debugPrint('扫描目录失败: $folderPath, $e');
       }
     }
 
@@ -2173,9 +2186,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
       final invalidPaths = <String>[];
 
       for (final path in playlist.songFilePaths) {
-        if (AndroidContentResolver.isContentUri(path)) continue;
-        final file = File(path);
-        if (!await file.exists()) {
+        if (!await AndroidContentResolver.exists(path)) {
           invalidPaths.add(path);
         }
       }
@@ -2216,12 +2227,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
         final updatedPaths = <String>[];
         final removedPaths = <String>[];
         for (final path in playlist.songFilePaths) {
-          if (AndroidContentResolver.isContentUri(path)) {
-            updatedPaths.add(path);
-            continue;
-          }
-          final file = File(path);
-          if (await file.exists()) {
+          if (await AndroidContentResolver.exists(path)) {
             updatedPaths.add(path);
           } else {
             removedPaths.add(path);
@@ -3945,7 +3951,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
     }
     _notificationService.info('已将歌曲“${songToMove.title}”置于顶部');
 
-    await _playlistManager.savePlaylists(_playlists);
+    await _savePlaylists();
 
     notifyListeners();
   }
@@ -4096,6 +4102,9 @@ class PlaylistContentNotifier extends ChangeNotifier {
         }
 
         try {
+          if (AndroidContentResolver.isContentUri(song.filePath)) {
+            throw StateError('SAF 文档暂不支持写回 ReplayGain 标签');
+          }
           final scan = await _scanReplayGainForSong(
             scanner,
             song.filePath,

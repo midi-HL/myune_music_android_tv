@@ -15,8 +15,8 @@ env:
   ANDROID_BUILD_TOOLS: "36.0.0"
   ANDROID_NDK_VERSION: "28.2.13676358"
   ANDROID_CMAKE_VERSION: "3.22.1"
-  # 本轮只出 arm64-v8a，收窄 Rust 交叉编译与 libmpv 下载的变量。
-  ANDROID_TARGET_PLATFORM: "android-arm64"
+  # 分别构建 64 位与 32 位单 ABI APK；每轮只编译一个 target-platform，
+  # 避免 Rust/cargokit 与 libmpv 下载任务在多 ABI 下互相覆盖产物。
   # 正式签名所需的 4 个 secrets；未配置时保持 Flutter 模板的 debug 签名。
   SIGNING_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
   SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -26,6 +26,16 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - abi: arm64-v8a
+            target: android-arm64
+            artifact: myune-music-android-arm64
+          - abi: armeabi-v7a
+            target: android-arm
+            artifact: myune-music-android-armv7
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -46,8 +56,7 @@ jobs:
       - name: Setup Rust (Android targets)
         uses: dtolnay/rust-toolchain@stable
         with:
-          # release 构建只需 aarch64，其余一并装上，方便后续开多 ABI。
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi
 
       # ubuntu-latest 已预装 Android SDK 与 cmdline-tools。
       # 不用 setup-android@v3：它默认仍安装已废弃的 "tools" 包，会直接报错退出。
@@ -237,8 +246,11 @@ jobs:
           print("release signingConfig enabled")
           PY
 
-      - name: Build APK (arm64-v8a, release)
-        run: flutter build apk --release --target-platform "${ANDROID_TARGET_PLATFORM}"
+      - name: Build APK (${{ matrix.abi }}, release)
+        run: |
+          flutter build apk --release --target-platform "${{ matrix.target }}"
+          apk="build/app/outputs/flutter-apk/app-release.apk"
+          mv "$apk" "build/app/outputs/flutter-apk/myune-music-${{ matrix.abi }}-release.apk"
 
       - name: Inspect APK
         run: |
@@ -247,12 +259,13 @@ jobs:
           apksigner="${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
           for apk in build/app/outputs/flutter-apk/*.apk; do
             "$apksigner" verify --print-certs "$apk" | head -12 || true
+            unzip -l "$apk" | grep -E "lib/${{ matrix.abi }}/libmpv.so|lib/${{ matrix.abi }}/librust_lib_myune_music.so" || true
           done
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: myune-music-android-arm64
+          name: ${{ matrix.artifact }}
           path: build/app/outputs/flutter-apk/*.apk
           if-no-files-found: error
           retention-days: 30
