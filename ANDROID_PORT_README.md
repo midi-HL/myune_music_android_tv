@@ -49,20 +49,14 @@
 
 ## 当前可用构建
 
-当前源码对应 commit `9dd594c`，Actions run `42191112151`，两个 matrix job 均 `success`。
+当前源码包含第四轮修复，等待本次 GitHub Actions 构建结果；下面的成功 run 是修复前的历史构建，仅作为基线，不应再用于真机复验。
 
-- `arm64-v8a`：[Artifact 13489993674](https://github.com/midi-HL/myune_music_android/actions/runs/42191112151/artifacts/13489993674)
-  - zip 41,924,021 bytes，zip SHA-256 `afef12b20dab74810b57ed81ecdd1023caa574155eb17edd8424e109d88f3944`
-  - APK `myune-music-arm64-v8a-release.apk` 73,819,902 bytes，SHA-256 `08bf0d4a3f92234d260aa32d92947d7c7a9b7c2bd783e2d3697ec739ba0f5cd9`
-  - 签名证书 SHA-256 `1e88d6fe7120fc97d00f4b6711b1fdd0d7e9ca65e3001dd4ce9a1658d7f9f809`
-- `armeabi-v7a`：[Artifact 13490257925](https://github.com/midi-HL/myune_music_android/actions/runs/42191112151/artifacts/13490257925)
-  - zip 41,370,352 bytes，zip SHA-256 `352e0c388536b22cbb4d74646d824f02f0d94711d8d7bfad102bffc2e24e60b0`
-  - APK `myune-music-armeabi-v7a-release.apk` 71,247,620 bytes，SHA-256 `7773315a0afa01c4fb574410668d8e646b0835d1f8b50b32ed1faa2c4634df88`
-  - 签名证书 SHA-256 `8ba6553f82c43f47daae062eac22fda6f56642fbd01e3f0cc727e7196a145657`
+- 历史 Actions run：`42163020869`，结论 `success`。
+- 历史 Artifact：`myune-music-android-arm64`（zip 41,920,631 bytes，SHA-256 `19831cb83b03a1d36d967efb31dfe5c60c771e8b012967f5673cd242594fd0f1`）。
+- 历史 APK：`app-release.apk`，71 MB；APK SHA-256 `ae86e5c0bd8f58a03201dabccf5a617a579e19a6c2a17e736cae3540ca47bd0f`。
+- 历史签名：`C=US, O=Android, CN=Android Debug`；签名证书 SHA-256 `8ba7875e63ea3a45aa959d8b3147978dd6b6d8959a31cb7ed9d21e88679a30ce`。
 
-两个包均为 debug 签名 `C=US, O=Android, CN=Android Debug`；每个 runner 独立生成 debug keystore，因此两个 ABI 的证书不同，覆盖安装遇到签名冲突时先卸载旧测试包。CI 已核对各自 ABI 的 `libmpv.so` 与 `librust_lib_myune_music.so`。
-
-历史构建：`42059743949` 验证启动与播放链路，`42126221458` 加入全屏/SAF/触屏适配，`42163020869` 是第四轮反馈前的基线。
+历史构建：`42059743949` 验证启动与播放链路，`42126221458` 加入全屏/SAF/触屏适配，`42163020869` 是第四轮反馈前的基线。本次构建完成后以新的两个 ABI Artifact 为准。
 
 ## 签名
 
