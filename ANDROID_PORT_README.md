@@ -48,13 +48,13 @@
 
 ## 当前可用构建
 
-- Actions run：`42163020869`，结论 `success`。
-- Artifact：`myune-music-android-arm64`（zip 41,920,631 bytes，SHA-256 `19831cb83b03a1d36d967efb31dfe5c60c771e8b012967f5673cd242594fd0f1`）。
-- APK：`app-release.apk`，71 MB；APK SHA-256 `ae86e5c0bd8f58a03201dabccf5a617a579e19a6c2a17e736cae3540ca47bd0f`。
-- 签名：`C=US, O=Android, CN=Android Debug`；签名证书 SHA-256 `8ba7875e63ea3a45aa959d8b3147978dd6b6d8959a31cb7ed9d21e88679a30ce`。
-- 下载入口：`https://github.com/midi-HL/myune_music_android/actions/runs/42163020869/artifacts/13478795058`（GitHub 登录后可下载）。
+- Actions run：`42126221458`，结论 `success`。
+- Artifact：`myune-music-android-arm64`（zip 41,922,438 bytes，SHA-256 `58d32b25fb23205a2fd5aa371d1c4d41b904a80f3ab4c0f0d00519e4dba5035b`）。
+- APK：`app-release.apk`，71 MB；APK SHA-256 `b4d6f16bad441f04d9e8e5ac37589a0bba2b3bd972f44cea5cdfb59f14dd4027`。
+- 签名：`C=US, O=Android, CN=Android Debug`；签名证书 SHA-256 `2f4fd0d8b5e7ba2a6351038b21fa4c1416104bf408c25fcfbcffdb9cdbfdd74b`。
+- 下载入口：`https://github.com/midi-HL/myune_music_android/actions/runs/42126221458/artifacts/13461727050`（GitHub 登录后可下载）。
 
-历史构建：`42059743949` 验证启动与播放链路，`42126221458` 加入全屏/缩放/SAF/触屏适配；当前 APK 额外修复播放页二次缩放、竖屏方向、竖屏歌词尺寸与杀后台状态。
+历史首个构建为 run `42059743949`，用于验证启动与播放链路；当前 APK 已包含全屏、缩放、SAF 与触屏适配。
 
 ## 签名
 
