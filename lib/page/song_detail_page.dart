@@ -10,6 +10,7 @@ import 'package:provider/provider.dart';
 import 'package:mesh_gradient/mesh_gradient.dart';
 import 'package:colorgram/colorgram.dart';
 
+import '../widgets/android_ui_scale.dart';
 import '../widgets/lyrics_widget.dart';
 import 'playlist/playlist_content_notifier.dart';
 import '../widgets/song_detail_page/playbar.dart';
@@ -380,7 +381,8 @@ class _SongDetailPageState extends State<SongDetailPage> {
     // 手机竖屏下放大歌词与播放控件，避免沿用桌面窄窗口的偏小布局。
     final portraitBoost = (isPortrait && Platform.isAndroid) ? 1.45 : 1.0;
 
-    return Listener(
+    return AndroidScaleCompensator(
+      child: Listener(
         onPointerDown: (_) => _handleUserInteraction(autoHideEnabled),
       onPointerMove: (_) => _handleUserInteraction(autoHideEnabled),
       onPointerHover: (_) => _handleUserInteraction(autoHideEnabled),
@@ -816,6 +818,7 @@ class _SongDetailPageState extends State<SongDetailPage> {
           ),
           drawer: const LyricsSettingsDrawer(),
         ),
+      ),
       ),
     );
   }

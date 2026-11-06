@@ -433,11 +433,7 @@ class _FolderManagementWidgetState extends State<_FolderManagementWidget> {
                     widget.selectedFolders.length,
                     (index) => ListTile(
                       title: Text(
-                        AndroidContentResolver.isContentUri(
-                          widget.selectedFolders[index],
-                        )
-                            ? '已授权的音乐目录'
-                            : widget.selectedFolders[index],
+                        widget.selectedFolders[index],
                         overflow: TextOverflow.ellipsis,
                       ),
                       dense: true,
@@ -1831,7 +1827,7 @@ class _SongTileWidgetState extends State<SongTileWidget>
                   onPressed: () => Navigator.pop(context, 'nextSong'),
                 ),
                 IconButton(
-                  tooltip: Platform.isAndroid ? '打开文件' : '显示文件',
+                  tooltip: '显示文件',
                   icon: Icon(Icons.folder_outlined, color: iconColor),
                   onPressed: () => Navigator.pop(context, 'showInExplorer'),
                 ),
@@ -2025,21 +2021,15 @@ class _SongTileWidgetState extends State<SongTileWidget>
       // messenger.showSnackBar(SnackBar(content: Text('已删除歌曲：$songTitle')));
     } else if (result == 'showInExplorer') {
       try {
-        if (Platform.isAndroid &&
-            AndroidContentResolver.isContentUri(widget.song.filePath)) {
-          await AndroidContentResolver.viewDocument(widget.song.filePath);
-        } else if (Platform.isAndroid) {
-          context.read<NotificationService>().info('Android 版请使用系统文件应用查看文件路径');
-        } else {
-          final directory = File(widget.song.filePath).parent.path;
-          if (Platform.isWindows) {
-            await Process.run('explorer', ['/select,', widget.song.filePath]);
-          } else if (Platform.isMacOS) {
-            // 对于MacOS的支持
-            await Process.run('open', ['-R', widget.song.filePath]);
-          } else if (Platform.isLinux) {
-            await Process.run('xdg-open', [directory]);
-          }
+        final directory = File(widget.song.filePath).parent.path;
+
+        if (Platform.isWindows) {
+          await Process.run('explorer', ['/select,', widget.song.filePath]);
+        } else if (Platform.isMacOS) {
+          // 对于MacOS的支持
+          await Process.run('open', ['-R', widget.song.filePath]);
+        } else if (Platform.isLinux) {
+          await Process.run('xdg-open', [directory]);
         }
       } catch (e) {
         if (mounted) {
@@ -2204,15 +2194,6 @@ class _SongTileWidgetState extends State<SongTileWidget>
           index: widget.index,
           child: InkWell(
             onTap: widget.onTap,
-            onLongPress: widget.enableContextMenu
-                ? () {
-                    final box = context.findRenderObject() as RenderBox;
-                    _showSongContextMenu(
-                      box.localToGlobal(box.size.center(Offset.zero)),
-                      notifier,
-                    );
-                  }
-                : null,
             onSecondaryTapDown: (details) {
               // 根据 enableContextMenu 参数决定是否显示右键菜单
               if (widget.enableContextMenu) {

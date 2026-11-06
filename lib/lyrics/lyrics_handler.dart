@@ -182,25 +182,16 @@ class LyricsHandler {
     final extension = source.fileExtension;
     if (extension == null) return;
 
-    late final Uint8List bytes;
-    if (AndroidContentResolver.isContentUri(songFilePath)) {
-      // 外置歌词仍按同目录同名查找；SAF 父目录枚举留待后续补齐。
-      return;
-    } else {
-      final lyricFilePath = p.join(
-        p.dirname(songFilePath),
-        '${p.basenameWithoutExtension(songFilePath)}.$extension',
-      );
-      final lyricFile = File(lyricFilePath);
-      if (!await lyricFile.exists()) return;
-      try {
-        bytes = await lyricFile.readAsBytes();
-      } catch (e) {
-        return;
-      }
-    }
+    final lyricFilePath = p.join(
+      p.dirname(songFilePath),
+      '${p.basenameWithoutExtension(songFilePath)}.$extension',
+    );
+
+    final lyricFile = File(lyricFilePath);
+    if (!await lyricFile.exists()) return;
 
     try {
+      final bytes = await lyricFile.readAsBytes();
       final lyrics = _parseExternalLyric(bytes, source);
       if (lyrics != null && lyrics.isNotEmpty) {
         _currentLyrics = lyrics;

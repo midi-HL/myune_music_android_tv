@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import '../../services/android_content_resolver.dart';
 import '../playlist/playlist_content_notifier.dart';
 import '../playlist/playlist_models.dart';
 
@@ -20,8 +19,10 @@ class _PlaylistCleanerState extends State<PlaylistCleaner> {
   String? _error;
 
   Future<void> _showCleanDialog() async {
-    // SAF 目录歌单也会出现授权撤销/文件删除，必须同样能扫描清理。
-    final playlists = widget.notifier.playlists.toList();
+    // 仅显示普通歌单
+    final playlists = widget.notifier.playlists
+        .where((p) => !p.isFolderBased)
+        .toList();
 
     if (playlists.isEmpty) {
       if (mounted) {
@@ -29,7 +30,7 @@ class _PlaylistCleanerState extends State<PlaylistCleaner> {
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text('提示'),
-            content: const Text('没有可扫描的歌单'),
+            content: const Text('没有可扫描的普通歌单'),
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(ctx).pop(),
@@ -155,7 +156,7 @@ class _PlaylistCleanerState extends State<PlaylistCleaner> {
             children: [
               CircularProgressIndicator(),
               SizedBox(height: 16),
-              Text('正在清理歌单无效文件...'),
+              Text('正在清理普通歌单无效文件...'),
             ],
           ),
         ),
@@ -500,9 +501,7 @@ class _ResultDialogState extends State<_ResultDialog> {
               value: _checkedInvalidPaths.contains(path),
               onChanged: (_) => _toggleInvalidPath(path),
               title: Text(
-                AndroidContentResolver.isContentUri(path)
-                    ? AndroidContentResolver.displayName(path, null)
-                    : p.basename(path),
+                p.basename(path),
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontSize: 15),
               ),

@@ -1,6 +1,4 @@
-﻿import 'dart:math' as math;
-
-import 'package:flutter/material.dart';
+﻿import 'package:flutter/material.dart';
 
 import '../../lyrics/lyric_source.dart';
 
@@ -38,7 +36,7 @@ class _LyricSourceOrderDialogState extends State<LyricSourceOrderDialog> {
     return AlertDialog(
       title: const Text('歌词来源优先级'),
       content: SizedBox(
-        width: math.min(380, MediaQuery.of(context).size.width - 80),
+        width: 380,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -104,18 +102,13 @@ class _LyricSourceOrderDialogState extends State<LyricSourceOrderDialog> {
                               ),
                             ),
                             const SizedBox(width: 8),
-                            ReorderableDelayedDragStartListener(
+                            ReorderableDragStartListener(
                               index: index,
-                              child: Container(
-                                width: 48,
-                                height: 48,
-                                alignment: Alignment.center,
-                                child: MouseRegion(
-                                  cursor: SystemMouseCursors.grab,
-                                  child: Icon(
-                                    Icons.drag_indicator,
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
+                              child: MouseRegion(
+                                cursor: SystemMouseCursors.grab,
+                                child: Icon(
+                                  Icons.drag_indicator,
+                                  color: colorScheme.onSurfaceVariant,
                                 ),
                               ),
                             ),

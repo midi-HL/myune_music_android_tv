@@ -12,8 +12,10 @@ class AppWindowTitleBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Android 无窗口概念，直接不渲染标题栏（全屏）
+    if (Platform.isAndroid) return const SizedBox.shrink();
     return Container(
-      height: Platform.isAndroid ? 44.0 : 31.0,
+      height: 31.0,
       decoration: const BoxDecoration(
         color: Colors.transparent, // 透明背景以显示模糊效果
       ),
@@ -42,78 +44,72 @@ class AppWindowTitleBar extends StatelessWidget {
                   tooltip: '歌词设置',
                   padding: EdgeInsets.zero,
                 ),
-                if (!Platform.isAndroid) ...[
-                  ColorFiltered(
-                    colorFilter: ColorFilter.mode(
-                      Theme.of(context).brightness == Brightness.dark
-                          ? Colors.white
-                          : Colors.black,
-                      BlendMode.srcIn,
-                    ),
-                    child: Image.asset(
-                      'assets/images/icon/icon.png',
-                      width: 21,
-                      height: 21,
-                    ),
+                ColorFiltered(
+                  colorFilter: ColorFilter.mode(
+                    Theme.of(context).brightness == Brightness.dark
+                        ? Colors.white
+                        : Colors.black,
+                    BlendMode.srcIn,
                   ),
-                  const SizedBox(width: 8),
-                  const Text(
-                    "MyuneMusic",
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                  child: Image.asset(
+                    'assets/images/icon/icon.png',
+                    width: 21,
+                    height: 21,
                   ),
-                ],
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  "MyuneMusic",
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
               ],
             ),
           ),
-          if (!Platform.isAndroid)
-            Expanded(
-              child: DragToMoveArea(
-                // 这里的Container是为了保证这个区域可以拖动
-                child: Container(),
-              ),
-            )
-          else
-            const Spacer(),
-          if (!Platform.isAndroid)
-            Align(
-              alignment: Alignment.centerRight,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _WindowButton(
-                    icon: Icons.remove,
-                    onPressed: () {
-                      final settings = Provider.of<SettingsProvider>(
-                        context,
-                        listen: false,
-                      );
-                      if (settings.minimizeToTray) {
-                        windowManager.hide();
-                      } else {
-                        windowManager.minimize();
-                      }
-                    },
-                    hoverColor: const Color.fromRGBO(144, 202, 249, 1),
-                  ),
-                  const SizedBox(width: 2),
-                  _WindowButton(
-                    icon: Icons.fullscreen_rounded,
-                    onPressed: () async {
-                      final bool isFullScreen = await windowManager
-                          .isFullScreen();
-                      await windowManager.setFullScreen(!isFullScreen);
-                    },
-                    hoverColor: const Color.fromRGBO(144, 202, 249, 1),
-                  ),
-                  const SizedBox(width: 2),
-                  _WindowButton(
-                    icon: Icons.close,
-                    onPressed: () => windowManager.close(),
-                    hoverColor: const Color.fromRGBO(239, 154, 154, 1),
-                  ),
-                ],
-              ),
+          Expanded(
+            child: DragToMoveArea(
+              // 这里的Container是为了保证这个区域可以拖动
+              child: Container(),
             ),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _WindowButton(
+                  icon: Icons.remove,
+                  onPressed: () {
+                    final settings = Provider.of<SettingsProvider>(
+                      context,
+                      listen: false,
+                    );
+                    if (settings.minimizeToTray) {
+                      windowManager.hide();
+                    } else {
+                      windowManager.minimize();
+                    }
+                  },
+                  hoverColor: const Color.fromRGBO(144, 202, 249, 1),
+                ),
+                const SizedBox(width: 2),
+                _WindowButton(
+                  icon: Icons.fullscreen_rounded,
+                  onPressed: () async {
+                    final bool isFullScreen = await windowManager
+                        .isFullScreen();
+                    await windowManager.setFullScreen(!isFullScreen);
+                  },
+                  hoverColor: const Color.fromRGBO(144, 202, 249, 1),
+                ),
+                const SizedBox(width: 2),
+                _WindowButton(
+                  icon: Icons.close,
+                  onPressed: () => windowManager.close(),
+                  hoverColor: const Color.fromRGBO(239, 154, 154, 1),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
-import '../../services/android_content_resolver.dart';
 import '../playlist/playlist_content_notifier.dart';
 import '../playlist/playlist_models.dart';
 
@@ -163,7 +162,7 @@ class _FolderPlaylistRefresherState extends State<FolderPlaylistRefresher> {
                   (path) => Padding(
                     padding: const EdgeInsets.only(left: 24),
                     child: Text(
-                      '• ${AndroidContentResolver.isContentUri(path) ? AndroidContentResolver.displayName(path, null) : p.basename(path)}',
+                      '• ${p.basename(path)}',
                       style: TextStyle(
                         color: Colors.red.shade700,
                         fontSize: 14,
@@ -188,7 +187,7 @@ class _FolderPlaylistRefresherState extends State<FolderPlaylistRefresher> {
                   (path) => Padding(
                     padding: const EdgeInsets.only(left: 24),
                     child: Text(
-                      '• ${AndroidContentResolver.isContentUri(path) ? AndroidContentResolver.displayName(path, null) : p.basename(path)}',
+                      '• ${p.basename(path)}',
                       style: TextStyle(
                         color: Colors.green.shade700,
                         fontSize: 14,

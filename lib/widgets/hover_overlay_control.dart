@@ -37,47 +37,32 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
 
   void _showOverlay() {
     if (_overlayEntry != null) return;
-    final overlay = Overlay.of(context);
-    final entry = OverlayEntry(
+    _overlayEntry = OverlayEntry(
       builder: (context) {
-        return Stack(
-          children: [
-            if (Platform.isAndroid)
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _removeOverlay,
-                  child: const SizedBox.expand(),
-                ),
-              ),
-            CompositedTransformFollower(
-              link: _layerLink,
-              offset: widget.overlayOffset,
-              targetAnchor: Alignment.topLeft,
-              followerAnchor: Alignment.topLeft,
-              child: Align(
-                alignment: Alignment.topLeft,
-                child: ConstrainedBox(
-                  constraints: widget.overlayConstraints,
-                  child: MouseRegion(
-                    onEnter: (_) => _setHovering(true),
-                    onExit: (_) => _setHovering(false),
-                    child: Material(
-                      elevation: 4,
-                      borderRadius: BorderRadius.circular(6),
-                      color: Theme.of(context).colorScheme.surfaceContainerLow,
-                      child: widget.overlayContentBuilder(context),
-                    ),
-                  ),
+        // 浮层上的MouseRegion，用于当鼠标移入浮层时保持其可见
+        return CompositedTransformFollower(
+          link: _layerLink,
+          offset: widget.overlayOffset,
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: ConstrainedBox(
+              constraints: widget.overlayConstraints,
+              child: MouseRegion(
+                onEnter: (_) => _setHovering(true),
+                onExit: (_) => _setHovering(false),
+                child: Material(
+                  elevation: 4,
+                  borderRadius: BorderRadius.circular(6),
+                  color: Theme.of(context).colorScheme.surfaceContainerLow,
+                  child: widget.overlayContentBuilder(context),
                 ),
               ),
             ),
-          ],
+          ),
         );
       },
     );
-    _overlayEntry = entry;
-    overlay.insert(entry);
+    Overlay.of(context).insert(_overlayEntry!);
   }
 
   void _removeOverlay() {
@@ -131,22 +116,28 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
               size: widget.size,
             ),
             onPressed: () {
-              // 触屏没有 hover：第一次点击展开，第二次点击只收起浮层。
-              if (Platform.isAndroid) {
+              // 触屏没有 hover：第一次点击先展开浮层，浮层内提供具体控件。
+              if (Platform.isAndroid && _overlayEntry == null) {
+                _showOverlay();
+                return;
+              }
+              // 如果外部传入了点击事件的处理函数
+              if (widget.onIconPressed != null) {
+                // 先执行外部的函数
+                widget.onIconPressed!();
+                // 浮层展开后再次点击收起，否则只刷新浮层状态。
+                if (Platform.isAndroid) {
+                  _removeOverlay();
+                } else {
+                  _overlayEntry?.markNeedsBuild();
+                }
+              } else {
+                // 如果外部没有传入处理函数，就执行默认逻辑
                 if (_overlayEntry == null) {
                   _showOverlay();
                 } else {
                   _removeOverlay();
                 }
-                return;
-              }
-              if (widget.onIconPressed != null) {
-                widget.onIconPressed!();
-                _overlayEntry?.markNeedsBuild();
-              } else if (_overlayEntry == null) {
-                _showOverlay();
-              } else {
-                _removeOverlay();
               }
             },
           ),

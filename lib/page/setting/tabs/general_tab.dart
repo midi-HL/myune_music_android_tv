@@ -142,7 +142,7 @@ class _GeneralTabState extends State<GeneralTab> {
               children: [
                 Row(
                   children: [
-                    Text('文字与控件密度', style: Theme.of(context).textTheme.titleMedium),
+                    Text('界面缩放', style: Theme.of(context).textTheme.titleMedium),
                     const SizedBox(width: 8),
                     Text(
                       '${(settings.androidUiScale * 100).round()}%',
@@ -151,9 +151,9 @@ class _GeneralTabState extends State<GeneralTab> {
                   ],
                 ),
                 Slider(
-                  min: 0.85,
-                  max: 1.15,
-                  divisions: 6,
+                  min: 0.55,
+                  max: 1.0,
+                  divisions: 9,
                   value: settings.androidUiScale,
                   label: '${(settings.androidUiScale * 100).round()}%',
                   onChanged: (value) {
@@ -161,7 +161,7 @@ class _GeneralTabState extends State<GeneralTab> {
                   },
                 ),
                 Text(
-                  '仅调整应用内文字与控件密度；画面始终铺满屏幕，不改系统 DPI',
+                  '仅影响应用内布局，不改系统 DPI；越小显示内容越多',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
               ],

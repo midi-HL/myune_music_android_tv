@@ -13,7 +13,6 @@ class PlaylistManager {
   static const String _artistSortOrderFileName = 'artist_sort_order.json';
   static const String _albumSortOrderFileName = 'album_sort_order.json';
   static const String _songMetadataCacheFileName = 'song_metadata_cache.json';
-  static const String _contentDisplayNamesFileName = 'content_display_names.json';
   static const String _migrationFlagKey = 'data_migrated_to_app_support';
 
   Future<String> _getLocalPath() async {
@@ -204,26 +203,7 @@ class PlaylistManager {
     }
   }
 
-  Future<File> _getContentDisplayNamesFile() async {
-    final path = await _getLocalPath();
-    return File('$path/$_contentDisplayNamesFileName');
-  }
-
-  Future<Map<dynamic, dynamic>> loadContentDisplayNames() async {
-    try {
-      final file = await _getContentDisplayNamesFile();
-      if (!await file.exists()) return const {};
-      final decoded = jsonDecode(await file.readAsString());
-      return decoded is Map<dynamic, dynamic> ? decoded : const {};
-    } catch (_) {
-      return const {};
-    }
-  }
-
-  Future<void> savePlaylists(
-    List<Playlist> playlists, {
-    Map<String, String>? contentDisplayNames,
-  }) async {
+  Future<void> savePlaylists(List<Playlist> playlists) async {
     try {
       // 保存歌单元数据
       final metadataFile = await _getMetadataFile();
@@ -231,12 +211,6 @@ class PlaylistManager {
           .map((playlist) => playlist.toJson()) // 调用 toJson 只包含 ID
           .toList();
       await metadataFile.writeAsString(jsonEncode(metadataJsonList));
-
-      // SAF 的 content URI 不是可读文件名，保存扫描时得到的显示名。
-      if (contentDisplayNames != null) {
-        final displayFile = await _getContentDisplayNamesFile();
-        await displayFile.writeAsString(jsonEncode(contentDisplayNames));
-      }
 
       // 保存每个歌单的歌曲路径文件
       final existingSongFileIds = <String>{}; // 用于追踪当前存在的歌单ID
