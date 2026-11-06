@@ -37,7 +37,6 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import 'page/statistics_page/statistics_manager.dart';
 import 'layout/navigation_notifier.dart';
 import 'services/license_service.dart';
-import 'widgets/android_ui_scale.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,8 +44,12 @@ void main() async {
   AppLicenses.register();
 
   if (Platform.isAndroid) {
-    // 隐藏系统状态栏与手势导航条；横屏/竖屏都允许，由页面自行适配。
+    // 隐藏系统状态栏与手势导航条；横屏媒体应用由手势从边缘唤出系统栏。
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    await SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
   }
 
   // ===== 以下为桌面端专属初始化，Android 上跳过 =====
@@ -182,6 +185,47 @@ void main() async {
   }
 }
 
+class _AndroidUiScaler extends StatelessWidget {
+  const _AndroidUiScaler({required this.child, required this.scale});
+
+  final Widget child;
+  final double scale;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 在更大的逻辑画布上布局，再整体视觉缩小。这样不需要修改系统 DPI，
+        // 固定的桌面字号/尺寸也会按同一比例变小，且点击坐标随变换一起缩放。
+        final effectiveScale = scale.clamp(0.55, 1.0);
+        final virtualWidth = constraints.maxWidth / effectiveScale;
+        final virtualHeight = constraints.maxHeight / effectiveScale;
+        return SizedBox.expand(
+          child: ClipRect(
+            child: OverflowBox(
+              alignment: Alignment.topLeft,
+              minWidth: virtualWidth,
+              maxWidth: virtualWidth,
+              minHeight: virtualHeight,
+              maxHeight: virtualHeight,
+              child: Transform.scale(
+                scale: effectiveScale,
+                alignment: Alignment.topLeft,
+                transformHitTests: true,
+                child: SizedBox(
+                  width: virtualWidth,
+                  height: virtualHeight,
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -226,14 +270,8 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (!Platform.isAndroid) return;
-    if (state == AppLifecycleState.resumed) {
+    if (Platform.isAndroid && state == AppLifecycleState.resumed) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    } else if (state == AppLifecycleState.detached && _listenersBound) {
-      // 用户从最近任务划掉 App 时，显式停止播放并清除媒体会话；
-      // 否则 Media3 前台服务可能继续持有播放状态，冷启动后 UI 与播放器不同步。
-      _playlistNotifier.mediaPlayer.setMediaSession(null);
-      _playlistNotifier.mediaPlayer.stop();
     }
   }
 
@@ -518,7 +556,7 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
               final uiScale = context
                   .watch<SettingsProvider>()
                   .androidUiScale;
-              return AndroidUiScaler(
+              return _AndroidUiScaler(
                 scale: uiScale,
                 child: materialAppChild!,
               );
