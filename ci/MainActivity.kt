@@ -1,125 +1,23 @@
 package com.midihl.myune_music_android
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
-import android.view.View
-import android.view.ViewGroup
-import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
-import io.flutter.embedding.android.FlutterView
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.embedding.engine.renderer.FlutterRenderer
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.util.LinkedList
 
 class MainActivity : FlutterActivity() {
     private val channel = "myune_music_android/saf"
-    private val uiScaleChannel = "myune_music_android/ui_scale"
-    private val uiScalePrefs = "FlutterSharedPreferences"
-    private val uiScaleKey = "flutter.android_ui_scale"
-    private val doublePrefix = "VGhpcyBpcyB0aGUgcHJlZml4IGZvciBEb3VibGUu"
     private val requestOpenTree = 4201
     private var pendingTreeResult: MethodChannel.Result? = null
-    private var uiScale = 0.72
-    private var flutterView: FlutterView? = null
-    private var lastViewportSignature: String? = null
-
-    override fun onCreate(savedInstanceState: android.os.Bundle?) {
-        super.onCreate(savedInstanceState)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            window.attributes = window.attributes.apply {
-                layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
-            }
-        }
-        uiScale = readUiScale()
-        window.decorView.post {
-            attachFlutterViewObserver()
-            applyViewportMetrics()
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        val savedScale = readUiScale()
-        if (savedScale != uiScale) {
-            uiScale = savedScale
-            lastViewportSignature = null
-        }
-        attachFlutterViewObserver()
-        applyViewportMetrics()
-    }
-
-    private fun readUiScale(): Double {
-        val stored = getSharedPreferences(uiScalePrefs, MODE_PRIVATE)
-            .getString(uiScaleKey, null)
-        return (stored?.removePrefix(doublePrefix)?.toDoubleOrNull() ?: 0.72)
-            .coerceIn(0.55, 1.0)
-    }
-
-    private fun attachFlutterViewObserver() {
-        if (flutterView != null) return
-        val decor = window.decorView as? ViewGroup ?: return
-        val view = decor.findViewById<FlutterView>(FLUTTER_VIEW_ID) ?: return
-        flutterView = view
-        view.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
-            override fun onViewAttachedToWindow(v: View) = applyViewportMetrics()
-
-            override fun onViewDetachedFromWindow(v: View) = Unit
-        })
-        view.viewTreeObserver.addOnGlobalLayoutListener { applyViewportMetrics() }
-        view.addFlutterEngineAttachmentListener(
-            object : FlutterView.FlutterEngineAttachmentListener {
-                override fun onFlutterEngineAttachedToFlutterView(engine: FlutterEngine) {
-                    view.post { applyViewportMetrics() }
-                }
-
-                override fun onFlutterEngineDetachedFromFlutterView() = Unit
-            },
-        )
-    }
-
-    private fun applyViewportMetrics() {
-        val engine = flutterEngine ?: return
-        val view = flutterView ?: return
-        if (!view.isAttachedToFlutterEngine || view.width <= 0 || view.height <= 0) return
-        val metrics = FlutterRenderer.ViewportMetrics()
-        metrics.width = view.width
-        metrics.height = view.height
-        metrics.devicePixelRatio = (resources.displayMetrics.density * uiScale).toFloat()
-        metrics.physicalTouchSlop = android.view.ViewConfiguration.get(this).scaledTouchSlop
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            val insets = view.rootWindowInsets
-            if (insets != null) {
-                val cutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    insets.displayCutout
-                } else {
-                    null
-                }
-                metrics.viewPaddingTop = cutout?.safeInsetTop ?: insets.systemWindowInsetTop
-                metrics.viewPaddingRight = cutout?.safeInsetRight ?: insets.systemWindowInsetRight
-                metrics.viewPaddingBottom = cutout?.safeInsetBottom ?: insets.systemWindowInsetBottom
-                metrics.viewPaddingLeft = cutout?.safeInsetLeft ?: insets.systemWindowInsetLeft
-            }
-        }
-        val signature = listOf(
-            metrics.width,
-            metrics.height,
-            metrics.devicePixelRatio,
-            metrics.viewPaddingTop,
-            metrics.viewPaddingRight,
-            metrics.viewPaddingBottom,
-            metrics.viewPaddingLeft,
-        ).joinToString(":")
-        if (signature == lastViewportSignature) return
-        lastViewportSignature = signature
-        engine.renderer.setViewportMetrics(metrics)
-    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -179,24 +77,6 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, uiScaleChannel)
-            .setMethodCallHandler { call, result ->
-                if (call.method == "setScale") {
-                    val scale = call.argument<Double>("scale")
-                    if (scale == null || scale < 0.55 || scale > 1.0) {
-                        result.error("INVALID", "scale must be between 0.55 and 1.0", null)
-                    } else if (scale != uiScale) {
-                        uiScale = scale
-                        lastViewportSignature = null
-                        applyViewportMetrics()
-                        result.success(null)
-                    } else {
-                        result.success(null)
-                    }
-                } else {
-                    result.notImplemented()
-                }
-            }
     }
 
     private fun pickDirectoryTree(result: MethodChannel.Result) {

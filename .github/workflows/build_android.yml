@@ -149,9 +149,8 @@ jobs:
           PY
 
       # mpv_audio_kit 的 Manifest 已带 FOREGROUND_SERVICE / POST_NOTIFICATIONS，
-      # 这里只补歌词抓取等网络功能需要的 INTERNET；同时让内容铺到挖孔区，
-      # 避免 Android 在横屏时把整个 FlutterView letterbox 成左侧黑带。
-      - name: Patch Android runner theme and permissions
+      # 这里只补歌词抓取等网络功能需要的 INTERNET。
+      - name: Patch AndroidManifest permissions
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -169,36 +168,7 @@ jobs:
               print("injected android.permission.INTERNET")
           else:
               print("android.permission.INTERNET already present")
-
-          cutout_item = (
-              '        <item name="android:windowLayoutInDisplayCutoutMode">'
-              'shortEdges</item>\n'
-          )
-          for folder in ("values-v28", "values-night-v28"):
-              directory = Path("android/app/src/main/res") / folder
-              directory.mkdir(parents=True, exist_ok=True)
-              styles = directory / "styles.xml"
-              if not styles.exists():
-                  styles.write_text(
-                      '<?xml version="1.0" encoding="utf-8"?>\n'
-                      '<resources>\n'
-                      '    <style name="LaunchTheme" parent="">\n'
-                      f'{cutout_item}'
-                      '    </style>\n'
-                      '    <style name="NormalTheme" parent="">\n'
-                      f'{cutout_item}'
-                      '    </style>\n'
-                      '</resources>\n',
-                      encoding="utf-8",
-                  )
-                  print(f"created {styles}")
-              else:
-                  print(f"{styles} already exists")
           PY
-          grep -qF 'android:windowLayoutInDisplayCutoutMode' \
-            android/app/src/main/res/values-v28/styles.xml
-          grep -qF 'android:windowLayoutInDisplayCutoutMode' \
-            android/app/src/main/res/values-night-v28/styles.xml
 
       # 可选正式签名：4 个 secrets 齐全时切换 release signingConfig；
       # 任一缺失则完全不动 runner，保留模板的 debug 签名用于本轮真机测试。

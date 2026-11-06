@@ -9,13 +9,11 @@ class VolumeControl extends StatefulWidget {
   final Player player;
   final Color iconColor;
   final double size;
-  final bool compactOverlay;
 
   const VolumeControl({
     required this.player,
     required this.iconColor,
     this.size = 24.0,
-    this.compactOverlay = false,
     super.key,
   });
 
@@ -59,12 +57,10 @@ class VolumeControlState extends State<VolumeControl> {
           size: widget.size,
           onIconPressed: playlistNotifier.toggleMute,
           onPointerSignal: (event) => _handleScroll(event, playlistNotifier),
-          overlayOffset: widget.compactOverlay
-              ? const Offset(-12, -150)
-              : const Offset(-12, -190),
-          overlayConstraints: BoxConstraints(
+          overlayOffset: const Offset(-12, -190),
+          overlayConstraints: const BoxConstraints(
             maxWidth: 64,
-            maxHeight: widget.compactOverlay ? 170 : 220,
+            maxHeight: 220,
           ),
           overlayContentBuilder: (context) {
             return _buildOverlayContent();
@@ -75,7 +71,6 @@ class VolumeControlState extends State<VolumeControl> {
   }
 
   Widget _buildOverlayContent() {
-    final sliderHeight = widget.compactOverlay ? 110.0 : 150.0;
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
       child: Column(
@@ -83,7 +78,7 @@ class VolumeControlState extends State<VolumeControl> {
         children: [
           SizedBox(
             width: 52,
-            height: sliderHeight,
+            height: 150,
             child: RotatedBox(
               quarterTurns: -1, // 横向滑块旋转成垂直显示
               child: SliderTheme(
