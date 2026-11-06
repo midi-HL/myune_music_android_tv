@@ -19,7 +19,14 @@ String _formatDuration(Duration duration) {
 }
 
 class Playbar extends StatefulWidget {
-  const Playbar({super.key});
+  const Playbar({
+    this.leading,
+    this.compact = false,
+    super.key,
+  });
+
+  final Widget? leading;
+  final bool compact;
 
   @override
   State<Playbar> createState() => _PlaybarState();
@@ -54,9 +61,9 @@ class _PlaybarState extends State<Playbar> {
     final size = MediaQuery.of(context).size;
     final double width = size.width > 0 ? size.width : 1150.0;
     final double height = size.height > 0 ? size.height : 620.0;
-    final double scale = (math.sqrt(
+    final scale = (math.sqrt(
       (width * height) / (1150.0 * 620.0),
-    )).clamp(0.5, 2.0);
+    )).clamp(0.5, 2.0) * (widget.compact ? 1.15 : 1.0);
 
     // 顶级 Consumer，确保 Playbar 整体能响应 PlaylistContentNotifier 的变化
     return Consumer<PlaylistContentNotifier>(
@@ -179,93 +186,74 @@ class _PlaybarState extends State<Playbar> {
             ),
             SizedBox(height: 4 * scale),
             // 播放控制按钮
-            Row(
-              mainAxisAlignment:
-                  MainAxisAlignment.spaceBetween, // 使左右两边的内容分别对齐到两端
-              children: [
-                // 左侧
-                Row(
-                  mainAxisSize: MainAxisSize.min, // 确保这个Row只占用必要的空间
-                  children: [
-                    // 上一首
-                    IconButton(
-                      icon: Icon(
-                        Icons.skip_previous,
-                        color: onBarColor,
-                        size: 28 * scale,
-                      ),
-                      onPressed: () => playlistNotifier.playPrevious(),
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (widget.leading != null) widget.leading!,
+                  IconButton(
+                    icon: Icon(
+                      Icons.skip_previous,
+                      color: onBarColor,
+                      size: 28 * scale,
                     ),
-                    // 播放/暂停按钮
-                    StreamBuilder<bool>(
-                      stream: player.stream.playing,
-                      initialData: playlistNotifier.isPlaying,
-                      builder: (context, snapshot) {
-                        final isPlaying = snapshot.data ?? false;
-                        return PlayPauseButton(
-                          isPlaying: isPlaying,
-                          color: accentColor,
-                          size: 36.0 * scale,
-                          onPressed: isPlaying
-                              ? playlistNotifier.pause
-                              : playlistNotifier.play,
-                        );
-                      },
+                    onPressed: () => playlistNotifier.playPrevious(),
+                  ),
+                  StreamBuilder<bool>(
+                    stream: player.stream.playing,
+                    initialData: playlistNotifier.isPlaying,
+                    builder: (context, snapshot) {
+                      final isPlaying = snapshot.data ?? false;
+                      return PlayPauseButton(
+                        isPlaying: isPlaying,
+                        color: accentColor,
+                        size: 36.0 * scale,
+                        onPressed: isPlaying
+                            ? playlistNotifier.pause
+                            : playlistNotifier.play,
+                      );
+                    },
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.skip_next,
+                      color: onBarColor,
+                      size: 28 * scale,
                     ),
-                    // 下一首
-                    IconButton(
-                      icon: Icon(
-                        Icons.skip_next,
-                        color: onBarColor,
-                        size: 28 * scale,
-                      ),
-                      onPressed: () => playlistNotifier.playNext(),
-                    ),
-                  ],
-                ),
-                // 右侧
-                Row(
-                  mainAxisSize: MainAxisSize.min, // 确保这个Row只占用必要的空间
-                  children: [
-                    // 随机播放按钮 (现在放在右侧功能键组)
-                    Consumer<PlaylistContentNotifier>(
-                      builder: (context, notifier, _) {
-                        return PlayModeButton(
-                          playMode: notifier.playMode,
-                          color: onBarColor.withValues(alpha: 0.7),
-                          activeColor: accentColor,
-                          size: 24.0 * scale,
-                          onPressed: () {
-                            notifier.togglePlayMode();
-                          },
-                        );
-                      },
-                    ),
-                    // 音量控制
-                    VolumeControl(
-                      player: player,
-                      iconColor: onBarColor,
-                      size: 24.0 * scale,
-                    ),
-                    // // 声道平衡、倍速控制
-                    BalanceRateControl(
-                      player: player,
-                      iconColor: onBarColor,
-                      size: 24.0 * scale,
-                    ),
-                    // 播放列表
-                    IconButton(
-                      icon: const Icon(Icons.lyrics_outlined),
-                      iconSize: 23 * scale,
-                      tooltip: '播放列表',
-                      onPressed: () {
-                        // 打开右侧抽屉
-                        Scaffold.of(context).openEndDrawer();
-                      },
-                    ),
-                  ],
-                ),
-              ],
+                    onPressed: () => playlistNotifier.playNext(),
+                  ),
+                  Consumer<PlaylistContentNotifier>(
+                    builder: (context, notifier, _) {
+                      return PlayModeButton(
+                        playMode: notifier.playMode,
+                        color: onBarColor.withValues(alpha: 0.7),
+                        activeColor: accentColor,
+                        size: 24.0 * scale,
+                        onPressed: () => notifier.togglePlayMode(),
+                      );
+                    },
+                  ),
+                  VolumeControl(
+                    player: player,
+                    iconColor: onBarColor,
+                    size: 24.0 * scale,
+                    compactOverlay: widget.compact,
+                  ),
+                  BalanceRateControl(
+                    player: player,
+                    iconColor: onBarColor,
+                    size: 24.0 * scale,
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.lyrics_outlined),
+                    iconSize: 23 * scale,
+                    tooltip: '播放列表',
+                    onPressed: () => Scaffold.of(context).openEndDrawer(),
+                  ),
+                ],
+              ),
             ),
           ],
         );

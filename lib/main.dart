@@ -149,10 +149,13 @@ void main() async {
   final statsManager = StatisticsManager();
   await statsManager.init();
 
+  final settingsProvider = SettingsProvider();
+  if (Platform.isAndroid) await settingsProvider.initializationFuture;
+
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => SettingsProvider()),
+        ChangeNotifierProvider.value(value: settingsProvider),
         ChangeNotifierProvider.value(value: themeProvider),
         ChangeNotifierProvider(create: (_) => NotificationService()),
         ChangeNotifierProvider(
@@ -513,7 +516,7 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
           darkTheme: themeProvider.darkThemeData,
           themeMode: themeProvider.themeMode,
           builder: (context, materialAppChild) {
-            // Android 上去掉窗口拖拽缩放与全局快捷键，只调整应用内密度。
+            // Android 上去掉窗口拖拽缩放与全局快捷键，同步整界面缩放倍率。
             if (Platform.isAndroid) {
               final uiScale = context
                   .watch<SettingsProvider>()

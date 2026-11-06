@@ -379,6 +379,7 @@ class _SongDetailPageState extends State<SongDetailPage> {
     )).clamp(0.5, 2.0);
     // 手机竖屏下放大歌词与播放控件，避免沿用桌面窄窗口的偏小布局。
     final portraitBoost = (isPortrait && Platform.isAndroid) ? 1.45 : 1.0;
+    final androidLandscape = Platform.isAndroid && !isPortrait;
 
     return Listener(
         onPointerDown: (_) => _handleUserInteraction(autoHideEnabled),
@@ -393,23 +394,24 @@ class _SongDetailPageState extends State<SongDetailPage> {
           body: BackgroundBlurWidget(
             child: Column(
               children: [
-                // 标题栏
-                AnimatedOpacity(
-                  duration: const Duration(milliseconds: 300),
-                  opacity: _isHidden ? 0.0 : 1.0,
-                  child: IgnorePointer(
-                    ignoring: _isHidden,
-                    child: Builder(
-                      builder: (BuildContext context) {
-                        return AppWindowTitleBar(
-                          onSettingsPressed: () {
-                            Scaffold.of(context).openDrawer();
-                          },
-                        );
-                      },
+                // Android 横屏不保留 Windows 窗口标题栏行；三点入口并入播放控制行。
+                if (!androidLandscape)
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 300),
+                    opacity: _isHidden ? 0.0 : 1.0,
+                    child: IgnorePointer(
+                      ignoring: _isHidden,
+                      child: Builder(
+                        builder: (BuildContext context) {
+                          return AppWindowTitleBar(
+                            onSettingsPressed: () {
+                              Scaffold.of(context).openDrawer();
+                            },
+                          );
+                        },
+                      ),
                     ),
                   ),
-                ),
                 // 主内容区域
                 Expanded(
                   child: isPortrait
@@ -472,7 +474,18 @@ class _SongDetailPageState extends State<SongDetailPage> {
                             ),
                           ],
                         )
-                      : // 横屏：保留原有布局
+                      : androidLandscape
+                          ? Builder(
+                              builder: (scaffoldContext) => _AndroidLandscapePlayer(
+                                scale: scale,
+                                isHidden: _isHidden,
+                                onSettingsPressed: () {
+                                  Scaffold.of(scaffoldContext).openDrawer();
+                                },
+                                child: const _LandscapeLyrics(),
+                              ),
+                            )
+                          : // 横屏：桌面保留原有布局
                         Row(
                           children: [
                             SizedBox(width: 80 * scale),
@@ -815,6 +828,157 @@ class _SongDetailPageState extends State<SongDetailPage> {
             ),
           ),
           drawer: const LyricsSettingsDrawer(),
+        ),
+      ),
+    );
+  }
+}
+
+class _AndroidLandscapePlayer extends StatelessWidget {
+  const _AndroidLandscapePlayer({
+    required this.scale,
+    required this.isHidden,
+    required this.onSettingsPressed,
+    required this.child,
+  });
+
+  final double scale;
+  final bool isHidden;
+  final VoidCallback onSettingsPressed;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final leftWidth = constraints.maxWidth * 0.42;
+          final coverSize = math.min(
+            leftWidth - 32.0,
+            constraints.maxHeight - 150.0,
+          ).clamp(96.0, 280.0);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SizedBox(
+                width: leftWidth,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      _LandscapeSongInfo(
+                        scale: scale,
+                        coverSize: coverSize,
+                      ),
+                      const Spacer(),
+                      AnimatedOpacity(
+                        duration: const Duration(milliseconds: 300),
+                        opacity: isHidden ? 0.0 : 1.0,
+                        child: IgnorePointer(
+                          ignoring: isHidden,
+                          child: Playbar(
+                            compact: true,
+                            leading: IconButton(
+                              icon: const Icon(Icons.more_horiz),
+                              tooltip: '歌词设置',
+                              onPressed: onSettingsPressed,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              Expanded(child: child),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _LandscapeSongInfo extends StatelessWidget {
+  const _LandscapeSongInfo({required this.scale, required this.coverSize});
+
+  final double scale;
+  final double coverSize;
+
+  @override
+  Widget build(BuildContext context) {
+    return Consumer<PlaylistContentNotifier>(
+      builder: (context, notifier, _) {
+        final song = notifier.currentSong;
+        return SizedBox(
+          width: coverSize,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                song?.title ?? '未知歌曲',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: (22 * scale).clamp(16.0, 26.0),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Text(
+                song?.artist ?? '未知歌手',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: (14 * scale).clamp(11.0, 18.0)),
+              ),
+              SizedBox(height: 8 * scale),
+              SizedBox.square(
+                dimension: coverSize,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: song?.albumArt != null && song!.albumArt!.isNotEmpty
+                      ? Image.memory(song.albumArt!, fit: BoxFit.cover)
+                      : ColoredBox(
+                          color: Colors.black12,
+                          child: Icon(
+                            Icons.music_note,
+                            size: coverSize * 0.35,
+                            color: Colors.black38,
+                          ),
+                        ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LandscapeLyrics extends StatelessWidget {
+  const _LandscapeLyrics();
+
+  @override
+  Widget build(BuildContext context) {
+    final notifier = context.watch<PlaylistContentNotifier>();
+    if (notifier.currentLyrics.isEmpty) {
+      return const Center(
+        child: Text('无歌词数据', style: TextStyle(color: Colors.grey)),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+      child: StreamBuilder<int>(
+        stream: notifier.lyricLineIndexStream,
+        initialData: notifier.currentLyricLineIndex,
+        builder: (context, snapshot) => LyricsView(
+          maxLinesPerLyric: context.watch<SettingsProvider>().maxLinesPerLyric,
+          fontScale: 1.0,
+          onTapLine: (index) => notifier.seekToLyricLine(index),
         ),
       ),
     );

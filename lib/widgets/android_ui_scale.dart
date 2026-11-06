@@ -1,38 +1,54 @@
-import 'package:flutter/material.dart';
+import 'dart:io';
 
-/// Android 应用内密度调节。
-///
-/// 不包裹 Transform、不修改 MediaQuery.size / devicePixelRatio / viewInsets：
-/// 那些值分别决定布局尺寸、物理像素换算与系统安全区，改动会造成黑边、
-/// 拖拽浮层坐标漂移和命中错位。这里只通过 Navigator 上方的 Theme 与文本
-/// 缩放影响所有页面、Dialog、Drawer 和 Overlay。
-class AndroidUiScaler extends StatelessWidget {
+import 'package:flutter/widgets.dart';
+
+import '../services/android_ui_scale_channel.dart';
+
+class AndroidUiScaler extends StatefulWidget {
   const AndroidUiScaler({required this.child, required this.scale, super.key});
 
   final Widget child;
   final double scale;
 
   @override
-  Widget build(BuildContext context) {
-    final effectiveScale = scale.clamp(0.85, 1.15);
-    final media = MediaQuery.of(context);
-    final theme = Theme.of(context);
-    final densityOffset = (effectiveScale - 1.0) * 2.0;
-    final scaledTheme = theme.copyWith(
-      visualDensity: VisualDensity(
-        horizontal: densityOffset,
-        vertical: densityOffset,
-      ),
-    );
+  State<AndroidUiScaler> createState() => _AndroidUiScalerState();
+}
 
-    return Theme(
-      data: scaledTheme,
-      child: MediaQuery(
-        data: media.copyWith(
-          textScaler: TextScaler.linear(effectiveScale),
-        ),
-        child: child,
-      ),
-    );
+class _AndroidUiScalerState extends State<AndroidUiScaler> with WidgetsBindingObserver {
+  double? _appliedScale;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _syncScale();
   }
+
+  @override
+  void didUpdateWidget(AndroidUiScaler oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _syncScale();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _syncScale(force: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  void _syncScale({bool force = false}) {
+    if (!Platform.isAndroid) return;
+    final scale = widget.scale.clamp(0.55, 1.0);
+    if (!force && _appliedScale == scale) return;
+    _appliedScale = scale;
+    AndroidUiScaleChannel.setScale(scale);
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }
