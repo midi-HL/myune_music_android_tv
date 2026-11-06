@@ -41,6 +41,7 @@ class LyricsWidget extends StatefulWidget {
   final int currentIndex;
   final int maxLinesPerLyric; // 最大行数
   final Function(int index)? onTapLine;
+  final double fontScale;
 
   const LyricsWidget({
     super.key,
@@ -48,6 +49,7 @@ class LyricsWidget extends StatefulWidget {
     required this.currentIndex,
     this.maxLinesPerLyric = 1,
     this.onTapLine,
+    this.fontScale = 1.0,
   });
 
   @override
@@ -1049,11 +1051,13 @@ class _LyricsWidgetState extends State<LyricsWidget>
       (s) => s.autoAdjustLyricLayout,
     );
     double fontSize = context.select<SettingsProvider, double>(
-      (s) => s.fontSize,
-    );
+          (s) => s.fontSize,
+        ) *
+        widget.fontScale;
     double lyricVerticalSpacing = context.select<SettingsProvider, double>(
-      (s) => s.lyricVerticalSpacing,
-    );
+          (s) => s.lyricVerticalSpacing,
+        ) *
+        widget.fontScale;
     final int lyricFontWeightValue = context.select<SettingsProvider, int>(
       (s) => s.lyricFontWeight,
     );
@@ -1069,8 +1073,8 @@ class _LyricsWidgetState extends State<LyricsWidget>
       final double scale = (math.sqrt(
         (width * height) / (1150.0 * 620.0),
       )).clamp(0.5, 2.0);
-      fontSize = 22.0 * scale;
-      lyricVerticalSpacing = 6.0 * scale;
+      fontSize = 22.0 * scale * widget.fontScale;
+      lyricVerticalSpacing = 6.0 * scale * widget.fontScale;
     }
     final enableLyricBlur = context.select<SettingsProvider, bool>(
       (s) => s.enableLyricBlur,
@@ -1584,8 +1588,14 @@ class _LyricsWidgetState extends State<LyricsWidget>
 class LyricsView extends StatelessWidget {
   final int maxLinesPerLyric;
   final Function(int index)? onTapLine;
+  final double fontScale;
 
-  const LyricsView({super.key, this.maxLinesPerLyric = 1, this.onTapLine});
+  const LyricsView({
+    super.key,
+    this.maxLinesPerLyric = 1,
+    this.onTapLine,
+    this.fontScale = 1.0,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1606,6 +1616,7 @@ class LyricsView extends StatelessWidget {
           currentIndex: currentLyricLineIndex,
           maxLinesPerLyric: maxLinesPerLyric,
           onTapLine: onTapLine,
+          fontScale: fontScale,
         );
 
         final settings = Provider.of<SettingsProvider>(context, listen: false);
