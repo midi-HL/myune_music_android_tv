@@ -191,7 +191,7 @@ class TvFocusController {
 }
 
 class TvFocusNavigatorObserver extends NavigatorObserver {
-  const TvFocusNavigatorObserver();
+  TvFocusNavigatorObserver();
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
@@ -339,23 +339,33 @@ class TvFocusHighlight extends StatefulWidget {
 
 class _TvFocusHighlightState extends State<TvFocusHighlight> {
   final ValueNotifier<Rect?> _rect = ValueNotifier<Rect?>(null);
+  bool _tracking = true;
 
   @override
   void initState() {
     super.initState();
     FocusManager.instance.addListener(_refresh);
-    WidgetsBinding.instance.addPersistentFrameCallback(_onFrame);
+    _scheduleNextFrame();
+  }
+
+  // WidgetsBinding 未提供 persistent callback 的注销接口，改用可撤销的
+  // 逐帧 post-frame 链，效果相同且 dispose 后不再继续调度。
+  void _scheduleNextFrame() {
+    if (!_tracking) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_tracking) return;
+      _refresh();
+      _scheduleNextFrame();
+    });
   }
 
   @override
   void dispose() {
+    _tracking = false;
     FocusManager.instance.removeListener(_refresh);
-    WidgetsBinding.instance.removePersistentFrameCallback(_onFrame);
     _rect.dispose();
     super.dispose();
   }
-
-  void _onFrame(Duration timestamp) => _refresh();
 
   void _refresh() {
     if (!mounted) return;

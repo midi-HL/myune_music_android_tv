@@ -561,7 +561,7 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
           debugShowCheckedModeBanner: false,
           title: '星音 StarNote',
           navigatorKey: tvRootNavigatorKey,
-          navigatorObservers: const <NavigatorObserver>[
+          navigatorObservers: <NavigatorObserver>[
             TvFocusNavigatorObserver(),
           ],
           theme: TvDevice.isTv
