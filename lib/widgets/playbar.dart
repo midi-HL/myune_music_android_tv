@@ -109,9 +109,33 @@ class _PlaybarState extends State<Playbar> {
                             fixedSize: WidgetStateProperty.all(
                               const Size(50, 50),
                             ),
-                            backgroundColor: WidgetStateProperty.all(
-                              colorScheme.surfaceContainerHighest,
-                            ),
+                            // TV 遥控器焦点落到封面时给出原生式背景高亮：
+                            // 只改变背景色 / overlay，不画任何描边框。
+                            backgroundColor:
+                                WidgetStateProperty.resolveWith<Color>((
+                              Set<WidgetState> states,
+                            ) {
+                              final base = colorScheme.surfaceContainerHighest;
+                              if (states.contains(WidgetState.focused)) {
+                                return Color.lerp(
+                                      base,
+                                      colorScheme.primary,
+                                      0.32,
+                                    )!;
+                              }
+                              return base;
+                            }),
+                            overlayColor:
+                                WidgetStateProperty.resolveWith<Color?>((
+                              Set<WidgetState> states,
+                            ) {
+                              if (states.contains(WidgetState.focused)) {
+                                return colorScheme.primary.withValues(
+                                  alpha: 0.18,
+                                );
+                              }
+                              return null;
+                            }),
                             minimumSize: WidgetStateProperty.all(
                               const Size(50, 50),
                             ),

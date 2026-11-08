@@ -302,7 +302,15 @@ class BalanceRateControl extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: TvPointerOnlySlider(
+          // 设置滑块必须能被遥控器到达并调值；TvAdjustableSlider 会让
+          // 左右调值、上下离开，避免像进度条那样吞掉四个方向键。
+          child: TvAdjustableSlider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
+            onChangeEnd: onChangeEnd,
             child: Slider(
               value: value,
               min: min,
@@ -377,9 +385,18 @@ class BalanceRateControl extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: RotatedBox(
-              quarterTurns: -1,
-              child: TvPointerOnlySlider(
+            // 包装放在 RotatedBox 外层，焦点矩形才是旋转后的竖向条，
+            // 方向键（↑↓ 调值 / ←→ 离开）与视觉方向一致。
+            child: TvAdjustableSlider(
+              vertical: true,
+              value: value,
+              min: -12.0,
+              max: 12.0,
+              divisions: 48,
+              onChanged: onChanged,
+              onChangeEnd: onChangeEnd,
+              child: RotatedBox(
+                quarterTurns: -1,
                 child: Slider(
                   value: value,
                   min: -12.0,

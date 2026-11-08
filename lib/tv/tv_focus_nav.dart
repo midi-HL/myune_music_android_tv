@@ -17,7 +17,10 @@ import 'tv_device.dart';
 // 3. 冷启动、路由切换、抽屉 / 浮层打开时把焦点落到真实可聚焦控件上，
 //    并优先选择面积较小的叶子控件，避免焦点落在整页容器上。
 // 4. 进度条一类会吞掉四个方向键的 Slider 不参与焦点遍历（见
-//    TvPointerOnlySlider），只保留鼠标 / 触控拖动。
+//    TvPointerOnlySlider），只保留鼠标 / 触控拖动；设置里的滑块改用
+//    TvAdjustableSlider，遥控器可调值且能用垂直方向键离开。
+// 5. 只有抽屉 / 对话框 / 菜单这类浮层内部才限制移动范围；主界面允许
+//    跨越左侧栏、内容区、底部播放栏等不同 FocusScope 按几何方向移动。
 
 class TvDirectionalFocusIntent extends Intent {
   const TvDirectionalFocusIntent(this.direction);
@@ -83,8 +86,13 @@ class TvFocusController {
 
   BuildContext? rootContext;
   bool _scheduled = false;
+  bool _pendingForce = false;
 
   void scheduleEnsureFocus() => _schedule(null);
+
+  // 抽屉 / 浮层关闭后，里面的焦点节点随之销毁，主动重新选一个可聚焦控件，
+  // 否则下一次方向键又会因为 primaryFocus 落空而空转。
+  void scheduleRestoreFocus() => _schedule(null, force: true);
 
   void scheduleFocusForRoute(Route<dynamic> route) =>
       _schedule((context) => ModalRoute.of(context) == route);
@@ -101,19 +109,22 @@ class TvFocusController {
     scheduleFocusInDrawer();
   }
 
-  void _schedule(bool Function(BuildContext)? where) {
+  void _schedule(bool Function(BuildContext)? where, {bool force = false}) {
+    _pendingForce = _pendingForce || force;
     if (_scheduled) return;
     _scheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scheduled = false;
       // 抽屉 / 弹窗有入场动画，等两帧再取焦点树。
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _apply(where);
+        _scheduled = false;
+        final pendingForce = _pendingForce;
+        _pendingForce = false;
+        _apply(where, force: pendingForce);
       });
     });
   }
 
-  void _apply(bool Function(BuildContext)? where) {
+  void _apply(bool Function(BuildContext)? where, {bool force = false}) {
     final manager = FocusManager.instance;
     final candidates = collectCandidates(manager.rootScope);
     if (candidates.isEmpty) return;
@@ -143,7 +154,7 @@ class TvFocusController {
         current == manager.rootScope ||
         current.context == null ||
         !current.context!.mounted;
-    if (!invalid) return;
+    if (!invalid && !force) return;
     _pickLeaf(candidates).requestFocus();
   }
 
@@ -170,17 +181,34 @@ class TvFocusController {
     final screen = screenSize();
     final candidates = collectCandidates(FocusManager.instance.rootScope);
     final cur = currentRect.center;
-    final scope = current.enclosingScope;
     const double epsilon = 2.0;
+
+    // 抽屉 / 对话框 / 弹出菜单打开时把焦点锁在该浮层内部；主界面则允许
+    // 跨越左侧栏、内容区、底部播放栏等不同的 FocusScope —— 早期版本用
+    // enclosingScope 硬隔离，导致「红圈 / 绿圈像两个图层、焦点互相过不去」。
+    final activeLayer = _activeModalLayer(current, candidates);
+
+    // 允许焦点落到可滚动内容里暂时被裁切的控件（上下各放宽一屏），
+    // 随后用 Scrollable.ensureVisible 把它滚进可视区。
+    final scrollReach = Rect.fromLTRB(
+      -screen.width * 0.1,
+      -screen.height,
+      screen.width * 1.1,
+      screen.height * 2,
+    );
 
     _FocusCandidate? best;
     double bestScore = double.infinity;
 
     for (final candidate in candidates) {
       if (candidate.node == current) continue;
-      // 只在同一模态层内移动，避免焦点跑到抽屉 / 弹窗背后的控件上。
-      if (candidate.node.enclosingScope != scope) continue;
-      if (!candidate.rect.overlaps(Offset.zero & screen)) continue;
+      final layer = _modalLayerOf(candidate.node);
+      if (activeLayer != null) {
+        if (layer != activeLayer) continue;
+      } else if (layer != null) {
+        continue;
+      }
+      if (!candidate.rect.overlaps(scrollReach)) continue;
       // 跳过整页级大容器。
       if (candidate.rect.width >= screen.width * 0.92 &&
           candidate.rect.height >= screen.height * 0.88) {
@@ -229,12 +257,68 @@ class TvFocusController {
 
     if (best == null) return false;
     best.node.requestFocus();
+    _ensureVisible(best.node);
     return true;
+  }
+
+  // 浮层标识：Drawer 不是 Navigator route，按 widget 判定；
+  // Dialog / 菜单 / BottomSheet 都是 PopupRoute，用 route 对象判定。
+  // 播放页与内层 Navigator 的页面是 PageRoute，不算浮层，主界面可自由跨越。
+  static Object? _modalLayerOf(FocusNode node) {
+    final context = node.context;
+    if (context == null || !context.mounted) return null;
+    final drawer = context.findAncestorWidgetOfExactType<Drawer>();
+    if (drawer != null) return drawer;
+    final route = ModalRoute.of(context);
+    if (route is PopupRoute) return route;
+    return null;
+  }
+
+  static Object? _activeModalLayer(
+    FocusNode current,
+    List<_FocusCandidate> candidates,
+  ) {
+    final own = _modalLayerOf(current);
+    if (own != null) return own;
+    // 浮层刚打开、焦点还留在主界面时，也要把焦点拉回浮层内。
+    for (final candidate in candidates.reversed) {
+      final layer = _modalLayerOf(candidate.node);
+      if (layer != null) return layer;
+    }
+    return null;
+  }
+
+  // 焦点移到被裁切的可选项时，自动把它滚进可视区（音效弹窗 / 长列表）。
+  static void _ensureVisible(FocusNode node) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final context = node.context;
+      if (context == null || !context.mounted) return;
+      try {
+        Scrollable.ensureVisible(
+          context,
+          alignment: 0.5,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
+      } catch (_) {
+        // 不在可滚动容器里时无需滚动。
+      }
+    });
   }
 
   static List<_FocusCandidate> collectCandidates(FocusNode root) {
     final out = <_FocusCandidate>[];
     _collect(root, out, 0);
+    return out;
+  }
+
+  // 返回当前可聚焦控件对应的 context，供返回键查找抽屉所属 Scaffold。
+  static List<BuildContext> focusableContexts() {
+    final out = <BuildContext>[];
+    for (final candidate in collectCandidates(FocusManager.instance.rootScope)) {
+      final context = candidate.node.context;
+      if (context != null && context.mounted) out.add(context);
+    }
     return out;
   }
 
@@ -279,6 +363,11 @@ class TvFocusController {
 class TvFocusNavigatorObserver extends NavigatorObserver {
   TvFocusNavigatorObserver();
 
+  // 返回键需要区分「确实关掉了一个 route」和 AppShell 里 PopScope 的
+  // canPop:false 空操作：maybePop() 被 PopScope 拦截时会返回 true 却不触发
+  // didPop，只有本计数增加才说明对话框 / 播放页真的出栈了。
+  static int popCount = 0;
+
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     TvFocusController.instance.scheduleFocusForRoute(route);
@@ -286,6 +375,7 @@ class TvFocusNavigatorObserver extends NavigatorObserver {
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    popCount++;
     if (previousRoute != null) {
       TvFocusController.instance.scheduleFocusForRoute(previousRoute);
     } else {
@@ -381,6 +471,165 @@ class TvPointerOnlySlider extends StatelessWidget {
   }
 }
 
+// 原生式焦点高亮：聚焦时给控件叠加一层半透明背景（类似 NavigationRail 的
+// indicator），不画描边框、不改写全局主题。用于侧边栏项、底部专辑封面等
+// 原本没有明显焦点态的控件。
+class TvFocusHighlight extends StatefulWidget {
+  const TvFocusHighlight({
+    this.builder,
+    this.child,
+    this.onActivate,
+    this.autofocus = false,
+    this.debugLabel,
+    super.key,
+  }) : assert(builder != null || child != null,
+            'TvFocusHighlight needs either builder or child');
+
+  /// 自定义聚焦外观（侧边栏要同时区分 selected / focused）。
+  final Widget Function(BuildContext context, bool focused)? builder;
+
+  /// 不传 builder 时用它，并自动叠加默认原生式背景高亮。
+  final Widget? child;
+  final VoidCallback? onActivate;
+  final bool autofocus;
+  final String? debugLabel;
+
+  @override
+  State<TvFocusHighlight> createState() => _TvFocusHighlightState();
+}
+
+class _TvFocusHighlightState extends State<TvFocusHighlight> {
+  late final FocusNode _node;
+
+  @override
+  void initState() {
+    super.initState();
+    _node = FocusNode(debugLabel: widget.debugLabel);
+    _node.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _node.removeListener(_onFocusChange);
+    _node.dispose();
+    super.dispose();
+  }
+
+  Widget _buildContent(BuildContext context, bool focused) {
+    if (widget.builder != null) return widget.builder!(context, focused);
+    // 默认原生式高亮：一层半透明主色背景 + 圆角，不画任何描边框。
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        color: focused
+            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.30)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: widget.child,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final focused = Focus(
+      focusNode: _node,
+      autofocus: widget.autofocus,
+      // 内部按钮自带的 Focus 节点退出焦点链，避免同一位置出现两个候选。
+      descendantsAreFocusable: false,
+      descendantsAreTraversable: false,
+      child: _buildContent(context, _node.hasFocus),
+    );
+    if (widget.onActivate == null) return focused;
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        ActivateIntent: CallbackAction<ActivateIntent>(
+          onInvoke: (ActivateIntent intent) {
+            widget.onActivate!();
+            return true;
+          },
+        ),
+      },
+      child: focused,
+    );
+  }
+}
+
+// 设置类滑块：遥控器可达、可调值，同时「垂直方向」的方向键必须能离开，
+// 否则会像进度条一样把四个方向键全部吞掉。
+// 水平滑块：←/→ 调值，↑/↓ 交给全局几何导航移开焦点；
+// 竖直滑块：↑/↓ 调值，←/→ 交给全局几何导航移开焦点。
+// 传入的 Slider 保持原样，鼠标 / 触控拖动依旧可用。
+class TvAdjustableSlider extends StatelessWidget {
+  const TvAdjustableSlider({
+    required this.child,
+    required this.value,
+    required this.min,
+    required this.max,
+    required this.onChanged,
+    this.divisions,
+    this.onChangeEnd,
+    this.vertical = false,
+    super.key,
+  });
+
+  final Widget child;
+  final double value;
+  final double min;
+  final double max;
+  final int? divisions;
+  final ValueChanged<double> onChanged;
+  final ValueChanged<double>? onChangeEnd;
+  final bool vertical;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!TvDevice.isTv) return child;
+    return Focus(
+      canRequestFocus: true,
+      skipTraversal: false,
+      // Slider 内部那个会吞掉四向键的 Focus / Shortcuts 退出焦点链，
+      // 方向键统一由这一层处理；鼠标 / 触控手势不受影响。
+      descendantsAreFocusable: false,
+      descendantsAreTraversable: false,
+      onKeyEvent: (FocusNode node, KeyEvent event) {
+        if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+          return KeyEventResult.ignored;
+        }
+        final key = event.logicalKey;
+        final increase = vertical
+            ? key == LogicalKeyboardKey.arrowUp
+            : key == LogicalKeyboardKey.arrowRight;
+        final decrease = vertical
+            ? key == LogicalKeyboardKey.arrowDown
+            : key == LogicalKeyboardKey.arrowLeft;
+        if (!increase && !decrease) {
+          // 其余方向键放行，交给 TvFocusScope 的几何导航移开焦点。
+          return KeyEventResult.ignored;
+        }
+        if (max <= min) return KeyEventResult.handled;
+        final step = (max - min) / (divisions ?? 20);
+        var next = (value + (increase ? step : -step)).clamp(min, max);
+        if (divisions != null && divisions! > 0) {
+          next = min + ((next - min) / step).round() * step;
+          next = next.clamp(min, max);
+        }
+        if ((next - value).abs() > 1e-9) {
+          onChanged(next);
+          onChangeEnd?.call(next);
+        }
+        return KeyEventResult.handled;
+      },
+      child: child,
+    );
+  }
+}
+
 class TvFocusScope extends StatefulWidget {
   const TvFocusScope({required this.child, super.key});
 
@@ -394,6 +643,10 @@ class _TvFocusScopeState extends State<TvFocusScope> {
   @override
   void initState() {
     super.initState();
+    // TV 上强制使用传统键盘焦点高亮模式：Material 控件只在
+    // FocusHighlightMode.traditional 下显示焦点态，否则遥控器移到侧边栏 /
+    // 专辑封面时看起来完全没有任何高亮。
+    FocusManager.instance.highlightMode = FocusHighlightMode.traditional;
     TvFocusController.instance.scheduleEnsureFocus();
   }
 

@@ -203,13 +203,14 @@ class _MainViewState extends State<MainView> {
                     behavior: HitTestBehavior.opaque,
                     // 鼠标 / 触控与遥控器 OK 走同一个 onSelect，方便真机排查。
                     onTap: () => onSelect(i),
-                    child: TvFocusable(
+                    child: TvFocusHighlight(
                       autofocus: i == 0,
                       debugLabel: 'tv-rail-${entries[i].routeName}',
                       onActivate: () => onSelect(i),
-                      child: _TvRailItem(
+                      builder: (context, focused) => _TvRailItem(
                         entry: entries[i],
                         selected: i == currentIndex,
+                        focused: focused,
                       ),
                     ),
                   ),
@@ -334,22 +335,35 @@ class _MainViewState extends State<MainView> {
 }
 
 class _TvRailItem extends StatelessWidget {
-  const _TvRailItem({required this.entry, required this.selected});
+  const _TvRailItem({
+    required this.entry,
+    required this.selected,
+    required this.focused,
+  });
 
   final PageEntry entry;
   final bool selected;
+  final bool focused;
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final color = selected ? scheme.primary : scheme.onSurfaceVariant;
-    return Container(
+    final Color background;
+    if (focused) {
+      // 原生式焦点高亮：一层半透明主色背景，不画任何描边框。
+      background = scheme.primary.withValues(alpha: 0.30);
+    } else if (selected) {
+      background = scheme.primary.withValues(alpha: 0.18);
+    } else {
+      background = Colors.transparent;
+    }
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 120),
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: selected
-            ? scheme.primary.withValues(alpha: 0.18)
-            : Colors.transparent,
+        color: background,
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(

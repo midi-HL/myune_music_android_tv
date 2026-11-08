@@ -339,3 +339,85 @@ Flutter 在 Android 上确实把方向键绑定 `DirectionalFocusIntent`、`sele
 ### 14.6 回滚
 
 `baseline-4168e51-pre-tv` 与 `baseline-558a71f-0713` 两个 tag 不变；本节改动是 `fc84dfe` 之后的新提交，可用 `git revert <新提交>` 回到 `fc84dfe`（第一版 TV，方向键不可用），或直接 checkout 上述 tag 回到移植前。
+
+## 15. 第三轮真机回归修复（2026-11-08 晚）
+
+用户再次用真机 + 遥控器回归，指出第 14 节方案仍有多处不符合预期，并明确要求只修「目前说明的 bug」。
+本节**覆盖第 14 节中与之冲突的描述**：14.1 的全局 `TvFocusHighlight` 与
+`ReadingOrderTraversalPolicy.inDirection() + next()/previous()` 兜底、14.4 的
+「TV 上禁用动态背景 / 降亮度封面」均已作废。
+
+### 15.1 本轮反馈与对应处理
+
+| 反馈 | 处理 |
+| --- | --- |
+| 原版没有额外亮框，现在出现两个高亮框；设置菜单初次进入整栏被框住；界面像被大改 | 删除 `TvFocusHighlight` 全局焦点框与 `applyTvFocusTheme()`，`main.dart` 恢复 `themeProvider.lightThemeData / darkThemeData`；焦点高亮只用 Material / Android 原生样式 |
+| 设置里「安全边框 / 过扫描安全边距」不合理，正常电视不需要 | 删除 `TvSafeArea`、`tv_overscan` 持久化字段与设置页「过扫描安全边距」Slider；`main.dart` 的 TV builder 不再包裹安全区 |
+| 方向键逻辑反直觉：视觉上左右却跳到上下 | 重写 `TvFocusController.moveFocus()` 为严格几何方向查找，按 `RenderBox` 全局 `Rect.center` 只在对应半平面找最近控件，不做阅读顺序兜底；找不到就不移动 |
+| 侧边栏能操作但条件严苛，很难到最右侧栏 / 侧边控件；旁边框里全部控件要能鼠标或触控控制 | 保留自建 TV rail，每项加 `MouseRegion + GestureDetector.onTap`，与 OK 键 `onActivate` 共用同一个 `onSelect` |
+| 音频 / 歌曲进度条四个方向键都被 Slider 吞掉，焦点卡死，只能鼠标拖出；播放页同样 | 新增 `TvPointerOnlySlider`（`canRequestFocus:false` + `skipTraversal` + `descendantsAreFocusable/Traversable:false`），TV 上把进度条从键盘焦点链排除，保留鼠标 / 触控拖动；快进快退仍由媒体键与手柄扳机承担 |
+| 播放页动态背景被「修没了」，只剩封面降亮度，没有模糊与动态 | 按用户要求**直接还原原代码**：`enableDynamicBackground = settings.enableDynamicBackground`、`MeshGradient` 动画、静态 `ImageFiltered(sigmaX/Y: 40)` 全部恢复；黑块暂不修（用户明确「短时间内修不好就先不修」） |
+| 音量调节里有文字提示，正常人都知道怎么用 | 删除 `↑↓ 调音量 · 返回关闭` 提示文字，保留竖向 Slider 与数值 |
+| 关闭浮层后焦点落空 | `HoverOverlayControl._removeOverlay()` 在 TV 上调度 `scheduleEnsureFocus()`，重新给方向键找起点 |
+
+### 15.2 严格空间导航实现要点
+
+- `TvDirectionalFocusAction.invoke()` 不再调用 `policy.inDirection()`；改为 `TvFocusController.instance.moveFocus(direction, node)`。
+- `moveFocus()` 用 `collectCandidates(rootScope)` 收集所有可聚焦控件（沿 `FocusNode.children` 递归，含 `FocusScopeNode`），按 `rectOf()` 取全局 `Rect`；按左 / 右 / 上 / 下四个半平面过滤，`score = 主方向距离 + 副方向偏移 × 2`。
+- 跳过整页级大容器（宽 ≥ 92% 且高 ≥ 88%）、包住当前控件的祖先容器，并限定同一 `enclosingScope`，避免焦点跑到抽屉 / 弹窗背后。
+- `_pickLeaf()` 选面积最小的可聚焦控件，避免焦点落到整页容器导致「整个界面被框住」。
+- 输入框焦点时返回 `KeyEventResult.ignored`，让 `EditableText` 自己的 Shortcuts 处理光标（返回 null 会被 Shortcuts 当成 handled 吞键）。
+
+### 15.3 Slider 覆盖清单
+
+除音量竖条外，所有 `Slider` 在 TV 上都由 `TvPointerOnlySlider` 包裹：
+主界面底部进度条、播放页横屏 / 竖屏进度条、TV 设置「界面缩放」、
+歌词显示设置 4 个滑块、音效 / 均衡器 2 个滑块、主题配色 1 个、
+自定义背景 3 个、常规设置 1 个（手机分支，TV 不构建但保持一致）。
+音量竖条按用户要求保留键盘焦点（上下调音量、返回键退出），不包裹。
+
+### 15.4 复核与回滚
+
+- 静态复核 51/51 通过：括号平衡、Slider 包裹覆盖、已删除项残留、import 路径、关键行为断言。
+- 提交 `af37e16`（第三轮修复）。回滚：`git revert af37e16` 回到 `096355a`（第二轮），
+  或 checkout `tv-v2-focus-fix`；更早基线仍是 `baseline-4168e51-pre-tv` / `baseline-558a71f-0713`。
+
+---
+
+## 16. 第四轮真机回归修复（2026-11-08 晚，5 张截图）
+
+本轮只处理用户 5 张截图列出的问题，不扩展其它工作。**本节覆盖第 15 节中已作废的描述**：
+15.2 的「限定同一 `enclosingScope`」、15.3 的「音效 / 均衡器滑块由 `TvPointerOnlySlider` 包裹」不再成立。
+
+### 16.1 用户确认的三点澄清
+
+| 问题 | 用户确认 |
+| --- | --- |
+| 第一张图「下面还有更多可选项……不会自己往下拉」 | 方向键把焦点移到被弹窗裁在可视区之外的选项时，弹窗内容自动滚动把焦点露出来（自动滚动） |
+| 第四张图「要多加个返回的功能」 | 返回键等同 ✕ 关闭 |
+| 第二、三张图要补的高亮 | 原生式背景高亮（**不要描边框**，不叠加双重高亮） |
+
+### 16.2 反馈与处理
+
+| 反馈 | 处理 |
+| --- | --- |
+| 第五张图（最严重）：红圈与绿圈像两个不同图层，焦点只在红圈时不能移到绿圈；例如焦点在底部「切换播放方式」按钮按上进不了内容区那三首歌，继续按反而跳到「设置」；专辑 / 歌手界面同样 | `moveFocus()` 删除 `candidate.node.enclosingScope != scope` 硬过滤。改为 `_modalLayerOf()`：仅 `Drawer` / `PopupRoute`（Dialog、菜单、BottomSheet）算模态浮层，浮层打开时把焦点锁在该层内；主界面允许跨越左侧栏、内容区 `Navigator` 页面、底部播放栏等不同 `FocusScope` 按几何方向自由移动 |
+| 第一张图：音效设置「音高 / 速度」遥控器到不了 | 新增 `TvAdjustableSlider`：用一层可聚焦的 `Focus` 包住原 `Slider`，`descendantsAreFocusable:false` 让 Slider 内部会吞四向键的 Focus / Shortcuts 退出焦点链；水平滑块 `←/→` 调值、`↑/↓` 放行给全局几何导航离开，竖向频段滑块 `↑/↓` 调值、`←/→` 离开。音效弹窗的音高、倍速、均衡器频段改用它；鼠标 / 触控拖动仍走原 `Slider` |
+| 第一张图：下方更多可选项焦点到了但内容不自动往下拉 | `moveFocus()` 的候选判定区域在滚动方向放宽上下各一屏（`scrollReach`），允许焦点落到被裁切选项；焦点落定后用 `Scrollable.ensureVisible()` 把它滚进可视区 |
+| 第二张图：底部专辑封面焦点无高亮 | `playbar.dart` 的 `FilledButton` 用 `WidgetStateProperty.resolveWith` 在 `WidgetState.focused` 时把背景向 `primary` 插值 32%，并加 `overlayColor`；不画描边框 |
+| 第三张图：侧边栏焦点完全无高亮，原版有 | 新增 `TvFocusHighlight`（`StatefulWidget` + 自有 `FocusNode` + 聚焦时 `setState`）；TV rail 每项改用它，`_TvRailItem` 增加 `focused` 参数，聚焦时叠加 `primary` 30% 半透明背景（`AnimatedContainer`），不画描边框。外层 `MouseRegion + GestureDetector.onTap` 保留，鼠标 / 触控仍可操作 |
+| 第四张图：「正在播放」抽屉返回键不能像 ✕ 一样关闭 | `TvBackHandler.handle()` 分层：浮层栈 → 显式关闭 `endDrawer` / `drawer`（含播放页自己 Scaffold 上的歌词设置抽屉，用 `focusableContexts()` + `Scaffold.maybeOf` 定位）→ `navigator.maybePop()` → `SystemNavigator.pop()`。不再依赖 `maybePop()` 返回值：`PopScope(canPop:false)` 会把它变成空操作，改用 `TvFocusNavigatorObserver.popCount` 判断是否真的关闭了 route；加 `_handling` 重入保护。关闭抽屉后 `scheduleRestoreFocus()` 强制重选焦点 |
+| 原生控件焦点态整体偏弱 | `TvFocusScope.initState()` 设置 `FocusManager.instance.highlightMode = FocusHighlightMode.traditional`，让 Material 原生焦点态正常显示；仍不叠加全局自定义主题与描边框 |
+
+### 16.3 进度条与设置滑块的分工
+
+- **进度条**（主界面底部、播放页横屏 / 竖屏）继续用 `TvPointerOnlySlider`，不参与键盘焦点遍历，避免四向键被吞；快进 / 快退仍由媒体键与手柄扳机承担。
+- **音量竖条**继续保留键盘焦点（上下调音量、返回键退出），不包裹。
+- **音效设置滑块**改用 `TvAdjustableSlider`。
+- 其它设置页滑块（界面缩放、歌词显示设置、主题配色、自定义背景、常规设置）本轮**按用户当前交代的范围保持 `TvPointerOnlySlider` 不变**，仍可用鼠标 / 触控；若后续要求遥控器也能调这些值，再统一替换。
+
+### 16.4 验证方式与已知限制
+
+- 静态复核 62/62 通过：括号平衡、关键行为断言、已删除项残留、import 覆盖、进度条 / 音量条 / 动态背景 / 过扫描等回归项。
+- 本机按用户要求**不再控制真机电视**；曾尝试安装 Android TV 模拟器，已装好 SDK 命令行工具、emulator、Android TV 系统镜像并创建 AVD，但本机 Windows Hypervisor Platform / AEHD 未启用且会话非管理员，x86_64 镜像无法启动、ARM64 镜像被 QEMU 拒绝，用户随后明确要求放弃模拟器安装。**因此本轮没有真机 / 模拟器 UI 实测**，需用户在真机回归。
+- 提交：见 `git log` 中 `android/tv: round-4` 开头的提交；回滚用 `git revert <该提交>`，或 checkout `tv-v3-focus-fix` / `baseline-4168e51-pre-tv`。
