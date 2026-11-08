@@ -643,10 +643,12 @@ class _TvFocusScopeState extends State<TvFocusScope> {
   @override
   void initState() {
     super.initState();
-    // TV 上强制使用传统键盘焦点高亮模式：Material 控件只在
+    // TV 上强制使用传统键盘焦点高亮：Material 控件只在
     // FocusHighlightMode.traditional 下显示焦点态，否则遥控器移到侧边栏 /
-    // 专辑封面时看起来完全没有任何高亮。
-    FocusManager.instance.highlightMode = FocusHighlightMode.traditional;
+    // 专辑封面时看起来完全没有任何高亮。highlightMode 是只读属性，
+    // 改由可写的 highlightStrategy 固定策略，避免随触摸输入切回 touch 模式。
+    FocusManager.instance.highlightStrategy =
+        FocusHighlightStrategy.alwaysTraditional;
     TvFocusController.instance.scheduleEnsureFocus();
   }
 

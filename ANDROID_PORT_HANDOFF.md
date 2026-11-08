@@ -407,7 +407,7 @@ Flutter 在 Android 上确实把方向键绑定 `DirectionalFocusIntent`、`sele
 | 第二张图：底部专辑封面焦点无高亮 | `playbar.dart` 的 `FilledButton` 用 `WidgetStateProperty.resolveWith` 在 `WidgetState.focused` 时把背景向 `primary` 插值 32%，并加 `overlayColor`；不画描边框 |
 | 第三张图：侧边栏焦点完全无高亮，原版有 | 新增 `TvFocusHighlight`（`StatefulWidget` + 自有 `FocusNode` + 聚焦时 `setState`）；TV rail 每项改用它，`_TvRailItem` 增加 `focused` 参数，聚焦时叠加 `primary` 30% 半透明背景（`AnimatedContainer`），不画描边框。外层 `MouseRegion + GestureDetector.onTap` 保留，鼠标 / 触控仍可操作 |
 | 第四张图：「正在播放」抽屉返回键不能像 ✕ 一样关闭 | `TvBackHandler.handle()` 分层：浮层栈 → 显式关闭 `endDrawer` / `drawer`（含播放页自己 Scaffold 上的歌词设置抽屉，用 `focusableContexts()` + `Scaffold.maybeOf` 定位）→ `navigator.maybePop()` → `SystemNavigator.pop()`。不再依赖 `maybePop()` 返回值：`PopScope(canPop:false)` 会把它变成空操作，改用 `TvFocusNavigatorObserver.popCount` 判断是否真的关闭了 route；加 `_handling` 重入保护。关闭抽屉后 `scheduleRestoreFocus()` 强制重选焦点 |
-| 原生控件焦点态整体偏弱 | `TvFocusScope.initState()` 设置 `FocusManager.instance.highlightMode = FocusHighlightMode.traditional`，让 Material 原生焦点态正常显示；仍不叠加全局自定义主题与描边框 |
+| 原生控件焦点态整体偏弱 | `TvFocusScope.initState()` 设置 `FocusManager.instance.highlightStrategy = FocusHighlightStrategy.alwaysTraditional`，让 Material 原生焦点态正常显示；仍不叠加全局自定义主题与描边框。注意 `highlightMode` 是只读属性，直接赋值会让 CI 编译失败（首跑 run `42480956512` 即因此失败），必须用可写的 `highlightStrategy` 固定策略 |
 
 ### 16.3 进度条与设置滑块的分工
 
