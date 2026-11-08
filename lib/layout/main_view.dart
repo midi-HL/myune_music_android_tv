@@ -197,13 +197,21 @@ class _MainViewState extends State<MainView> {
                   horizontal: 6,
                   vertical: 4,
                 ),
-                child: TvFocusable(
-                  autofocus: i == 0,
-                  debugLabel: 'tv-rail-${entries[i].routeName}',
-                  onActivate: () => onSelect(i),
-                  child: _TvRailItem(
-                    entry: entries[i],
-                    selected: i == currentIndex,
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    // 鼠标 / 触控与遥控器 OK 走同一个 onSelect，方便真机排查。
+                    onTap: () => onSelect(i),
+                    child: TvFocusable(
+                      autofocus: i == 0,
+                      debugLabel: 'tv-rail-${entries[i].routeName}',
+                      onActivate: () => onSelect(i),
+                      child: _TvRailItem(
+                        entry: entries[i],
+                        selected: i == currentIndex,
+                      ),
+                    ),
                   ),
                 ),
               ),

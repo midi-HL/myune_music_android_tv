@@ -87,6 +87,11 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
     TvOverlayRegistry.instance.remove(_closeCallback);
     _overlayEntry?.remove();
     _overlayEntry = null;
+    // 浮层内的焦点节点随 OverlayEntry 一起销毁；重新给方向键找一个起点，
+    // 否则关掉音量条后焦点落空，下一次方向键又会空转。
+    if (mounted && TvDevice.isTv) {
+      TvFocusController.instance.scheduleEnsureFocus();
+    }
   }
 
   void _setHovering(bool hovering) {

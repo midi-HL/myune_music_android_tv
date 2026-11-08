@@ -564,25 +564,19 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
           navigatorObservers: <NavigatorObserver>[
             TvFocusNavigatorObserver(),
           ],
-          theme: TvDevice.isTv
-              ? applyTvFocusTheme(themeProvider.lightThemeData)
-              : themeProvider.lightThemeData,
-          darkTheme: TvDevice.isTv
-              ? applyTvFocusTheme(themeProvider.darkThemeData)
-              : themeProvider.darkThemeData,
+          // 焦点高亮完全沿用 Material / Android 原生样式，不再叠加 TV 专属主题。
+          theme: themeProvider.lightThemeData,
+          darkTheme: themeProvider.darkThemeData,
           themeMode: themeProvider.themeMode,
           builder: (context, materialAppChild) {
-            // Android TV：不做手机端的 0.72 缩放，改用 10-foot 安全区 +
-            // TV 专用缩放，并挂上统一输入层与焦点遍历策略。
+            // Android TV：不做手机端的 0.72 缩放，也不做过扫描留白；
+            // 只挂统一输入层与焦点遍历策略，界面保持原样。
             if (Platform.isAndroid && TvDevice.isTv) {
               final tv = context.watch<TvSettings>();
               return TvInputScope(
-                child: TvSafeArea(
-                  overscan: tv.overscan,
-                  child: TvUiScaler(
-                    scale: tv.uiScale,
-                    child: materialAppChild!,
-                  ),
+                child: TvUiScaler(
+                  scale: tv.uiScale,
+                  child: materialAppChild!,
                 ),
               );
             }

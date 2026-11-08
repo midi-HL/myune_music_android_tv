@@ -171,11 +171,7 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
     final useBlurBackground = settings.useBlurBackground;
-    // mesh_gradient 的持续动画在 Android TV GPU 上会产生移动黑块；
-    // TV 分支强制走静态背景，桌面与手机端行为不变。
-    final isTv = TvDevice.isTv;
-    final enableDynamicBackground =
-        settings.enableDynamicBackground && !isTv;
+    final enableDynamicBackground = settings.enableDynamicBackground;
 
     // 动画开关逻辑，通过延迟到帧后来避免 build 期间的副作用
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -261,31 +257,23 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
           );
         }
 
-        // 静态背景：TV 上完全跳过 ImageFiltered 与 MeshGradient
-        // （Android TV GPU 上会产生黑色移动色块），改用降亮度的封面 + 遮罩层。
-        // 桌面 / 手机端保留原来的 40 sigma 高斯模糊。
-        final albumImage = Image.memory(
-          currentSong!.albumArt!,
-          fit: BoxFit.cover,
-          color: isTv ? Colors.white.withValues(alpha: 0.45) : null,
-          colorBlendMode: isTv ? ui.BlendMode.modulate : null,
-          errorBuilder: (context, error, stackTrace) =>
-              Container(color: Theme.of(context).colorScheme.surface),
-        );
+        // 静态高斯模糊背景部分
         return Stack(
           fit: StackFit.expand,
           children: [
-            if (isTv)
-              albumImage
-            else
-              ImageFiltered(
-                imageFilter: ui.ImageFilter.blur(
-                  sigmaX: 40,
-                  sigmaY: 40,
-                  tileMode: TileMode.decal,
-                ),
-                child: albumImage,
+            ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: 40,
+                sigmaY: 40,
+                tileMode: TileMode.decal,
               ),
+              child: Image.memory(
+                currentSong!.albumArt!,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    Container(color: Theme.of(context).colorScheme.surface),
+              ),
+            ),
             IgnorePointer(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),

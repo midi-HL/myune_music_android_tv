@@ -149,50 +149,53 @@ class _PlaybarState extends State<Playbar> {
                               totalDuration.inMilliseconds;
                   }
 
-                  return Slider(
-                    value: sliderValue.clamp(0.0, 1.0),
-                    min: 0.0,
-                    max: 1.0,
-                    label: _isDraggingSlider
-                        ? _formatDuration(
-                            Duration(
-                              milliseconds:
-                                  (player.state.duration.inMilliseconds *
-                                          sliderValue)
-                                      .round(),
-                            ),
-                          )
-                        : null,
-                    onChanged: (double newValue) {
-                      setState(() {
-                        _isDraggingSlider = true;
-                        _currentSliderValue = newValue;
-                      });
-                    },
-                    onChangeStart: (double startValue) {
-                      _dragSessionId++;
-                      _isDraggingSlider = true; // 开始拖动
-                    },
-                    onChangeEnd: (double endValue) async {
-                      final currentSessionId = _dragSessionId;
-                      final totalDuration = player.state.duration;
-                      final seekPosition = Duration(
-                        milliseconds: (totalDuration.inMilliseconds * endValue)
-                            .round(),
-                      );
-                      player.seek(seekPosition); // 拖动结束后才实际 seek
-                      await Future.delayed(const Duration(milliseconds: 200));
-                      if (mounted && _dragSessionId == currentSessionId) {
+                  // TV 上进度条不参与键盘焦点遍历，避免 Slider 吞掉方向键。
+                  return TvPointerOnlySlider(
+                    child: Slider(
+                      value: sliderValue.clamp(0.0, 1.0),
+                      min: 0.0,
+                      max: 1.0,
+                      label: _isDraggingSlider
+                          ? _formatDuration(
+                              Duration(
+                                milliseconds:
+                                    (player.state.duration.inMilliseconds *
+                                            sliderValue)
+                                        .round(),
+                              ),
+                            )
+                          : null,
+                      onChanged: (double newValue) {
                         setState(() {
-                          _isDraggingSlider = false; // 结束拖动
-                          _currentSliderValue =
-                              totalDuration.inMilliseconds == 0
-                              ? 0.0
-                              : seekPosition.inMilliseconds /
-                                    totalDuration.inMilliseconds;
+                          _isDraggingSlider = true;
+                          _currentSliderValue = newValue;
                         });
-                      }
-                    },
+                      },
+                      onChangeStart: (double startValue) {
+                        _dragSessionId++;
+                        _isDraggingSlider = true; // 开始拖动
+                      },
+                      onChangeEnd: (double endValue) async {
+                        final currentSessionId = _dragSessionId;
+                        final totalDuration = player.state.duration;
+                        final seekPosition = Duration(
+                          milliseconds:
+                              (totalDuration.inMilliseconds * endValue).round(),
+                        );
+                        player.seek(seekPosition); // 拖动结束后才实际 seek
+                        await Future.delayed(const Duration(milliseconds: 200));
+                        if (mounted && _dragSessionId == currentSessionId) {
+                          setState(() {
+                            _isDraggingSlider = false; // 结束拖动
+                            _currentSliderValue =
+                                totalDuration.inMilliseconds == 0
+                                ? 0.0
+                                : seekPosition.inMilliseconds /
+                                      totalDuration.inMilliseconds;
+                          });
+                        }
+                      },
+                    ),
                   );
                 },
               ),
@@ -417,50 +420,56 @@ class _PortraitPlaybarState extends State<PortraitPlaybar> {
                                 totalDuration.inMilliseconds;
                     }
 
-                    return Slider(
-                      value: sliderValue.clamp(0.0, 1.0),
-                      min: 0.0,
-                      max: 1.0,
-                      label: _isDraggingSlider
-                          ? _formatDuration(
-                              Duration(
-                                milliseconds:
-                                    (player.state.duration.inMilliseconds *
-                                            sliderValue)
-                                        .round(),
-                              ),
-                            )
-                          : null,
-                      onChanged: (double newValue) {
-                        setState(() {
-                          _isDraggingSlider = true;
-                          _currentSliderValue = newValue;
-                        });
-                      },
-                      onChangeStart: (double startValue) {
-                        _dragSessionId++;
-                        _isDraggingSlider = true; // 开始拖动
-                      },
-                      onChangeEnd: (double endValue) async {
-                        final currentSessionId = _dragSessionId;
-                        final totalDuration = player.state.duration;
-                        final seekPosition = Duration(
-                          milliseconds:
-                              (totalDuration.inMilliseconds * endValue).round(),
-                        );
-                        player.seek(seekPosition); // 拖动结束后才实际 seek
-                        await Future.delayed(const Duration(milliseconds: 200));
-                        if (mounted && _dragSessionId == currentSessionId) {
+                    // TV 上进度条不参与键盘焦点遍历，避免 Slider 吞掉方向键。
+                    return TvPointerOnlySlider(
+                      child: Slider(
+                        value: sliderValue.clamp(0.0, 1.0),
+                        min: 0.0,
+                        max: 1.0,
+                        label: _isDraggingSlider
+                            ? _formatDuration(
+                                Duration(
+                                  milliseconds:
+                                      (player.state.duration.inMilliseconds *
+                                              sliderValue)
+                                          .round(),
+                                ),
+                              )
+                            : null,
+                        onChanged: (double newValue) {
                           setState(() {
-                            _isDraggingSlider = false; // 结束拖动
-                            _currentSliderValue =
-                                totalDuration.inMilliseconds == 0
-                                ? 0.0
-                                : seekPosition.inMilliseconds /
-                                      totalDuration.inMilliseconds;
+                            _isDraggingSlider = true;
+                            _currentSliderValue = newValue;
                           });
-                        }
-                      },
+                        },
+                        onChangeStart: (double startValue) {
+                          _dragSessionId++;
+                          _isDraggingSlider = true; // 开始拖动
+                        },
+                        onChangeEnd: (double endValue) async {
+                          final currentSessionId = _dragSessionId;
+                          final totalDuration = player.state.duration;
+                          final seekPosition = Duration(
+                            milliseconds:
+                                (totalDuration.inMilliseconds * endValue)
+                                    .round(),
+                          );
+                          player.seek(seekPosition); // 拖动结束后才实际 seek
+                          await Future.delayed(
+                            const Duration(milliseconds: 200),
+                          );
+                          if (mounted && _dragSessionId == currentSessionId) {
+                            setState(() {
+                              _isDraggingSlider = false; // 结束拖动
+                              _currentSliderValue =
+                                  totalDuration.inMilliseconds == 0
+                                  ? 0.0
+                                  : seekPosition.inMilliseconds /
+                                        totalDuration.inMilliseconds;
+                            });
+                          }
+                        },
+                      ),
                     );
                   },
                 ),

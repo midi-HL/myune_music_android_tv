@@ -6,6 +6,7 @@ import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:provider/provider.dart';
 
 import '../page/playlist/playlist_content_notifier.dart';
+import '../tv/tv_focus_nav.dart';
 
 class BalanceRateControl extends StatelessWidget {
   final Player player;
@@ -301,13 +302,15 @@ class BalanceRateControl extends StatelessWidget {
           ),
         ),
         Expanded(
-          child: Slider(
-            value: value,
-            min: min,
-            max: max,
-            divisions: divisions,
-            onChanged: onChanged,
-            onChangeEnd: onChangeEnd,
+          child: TvPointerOnlySlider(
+            child: Slider(
+              value: value,
+              min: min,
+              max: max,
+              divisions: divisions,
+              onChanged: onChanged,
+              onChangeEnd: onChangeEnd,
+            ),
           ),
         ),
         SizedBox(
@@ -376,13 +379,15 @@ class BalanceRateControl extends StatelessWidget {
           Expanded(
             child: RotatedBox(
               quarterTurns: -1,
-              child: Slider(
-                value: value,
-                min: -12.0,
-                max: 12.0,
-                divisions: 48,
-                onChanged: onChanged,
-                onChangeEnd: onChangeEnd,
+              child: TvPointerOnlySlider(
+                child: Slider(
+                  value: value,
+                  min: -12.0,
+                  max: 12.0,
+                  divisions: 48,
+                  onChanged: onChanged,
+                  onChangeEnd: onChangeEnd,
+                ),
               ),
             ),
           ),

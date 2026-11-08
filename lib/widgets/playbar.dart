@@ -232,65 +232,69 @@ class _PlaybarState extends State<Playbar> {
                                       totalDuration.inMilliseconds;
                           }
 
-                          return Slider(
-                            value: sliderValue.clamp(0.0, 1.0),
-                            min: 0.0,
-                            max: 1.0,
-                            label: _isDraggingSlider
-                                ? _formatDuration(
-                                    Duration(
-                                      milliseconds:
-                                          (player
-                                                      .state
-                                                      .duration
-                                                      .inMilliseconds *
-                                                  sliderValue)
-                                              .round(),
-                                    ),
-                                  )
-                                : null,
-                            onChanged: (double newValue) {
-                              // 用户拖动时，只更新内部状态
-                              setState(() {
-                                _isDraggingSlider = true;
-                                _currentSliderValue = newValue;
-                              });
-                            },
-                            onChangeStart: (double startValue) {
-                              _dragSessionId++;
-                              _isDraggingSlider = true; // 开始拖动
-                            },
-                            onChangeEnd: (double endValue) async {
-                              final currentSessionId = _dragSessionId;
-
-                              // 获取当前总时长，用于计算seek位置
-                              final totalDuration = player.state.duration;
-
-                              final seekPosition = Duration(
-                                milliseconds:
-                                    (totalDuration.inMilliseconds * endValue)
-                                        .round(),
-                              );
-                              player.seek(seekPosition); // 拖动结束后才实际 seek
-
-                              // 等待一小段时间，让播放器状态流更新，避免进度条闪烁
-                              await Future.delayed(
-                                const Duration(milliseconds: 200),
-                              );
-
-                              // 拖动结束后，立即更新滑块到最终位置，即使定时器还未触发
-                              if (mounted &&
-                                  _dragSessionId == currentSessionId) {
+                          // TV 上进度条不参与键盘焦点遍历，否则 Slider 会
+                          // 吞掉四个方向键，焦点无法再移动到其它控件。
+                          return TvPointerOnlySlider(
+                            child: Slider(
+                              value: sliderValue.clamp(0.0, 1.0),
+                              min: 0.0,
+                              max: 1.0,
+                              label: _isDraggingSlider
+                                  ? _formatDuration(
+                                      Duration(
+                                        milliseconds:
+                                            (player
+                                                        .state
+                                                        .duration
+                                                        .inMilliseconds *
+                                                    sliderValue)
+                                                .round(),
+                                      ),
+                                    )
+                                  : null,
+                              onChanged: (double newValue) {
+                                // 用户拖动时，只更新内部状态
                                 setState(() {
-                                  _isDraggingSlider = false; // 结束拖动
-                                  _currentSliderValue =
-                                      totalDuration.inMilliseconds == 0
-                                      ? 0.0
-                                      : seekPosition.inMilliseconds /
-                                            totalDuration.inMilliseconds;
+                                  _isDraggingSlider = true;
+                                  _currentSliderValue = newValue;
                                 });
-                              }
-                            },
+                              },
+                              onChangeStart: (double startValue) {
+                                _dragSessionId++;
+                                _isDraggingSlider = true; // 开始拖动
+                              },
+                              onChangeEnd: (double endValue) async {
+                                final currentSessionId = _dragSessionId;
+
+                                // 获取当前总时长，用于计算seek位置
+                                final totalDuration = player.state.duration;
+
+                                final seekPosition = Duration(
+                                  milliseconds:
+                                      (totalDuration.inMilliseconds * endValue)
+                                          .round(),
+                                );
+                                player.seek(seekPosition); // 拖动结束后才实际 seek
+
+                                // 等待一小段时间，让播放器状态流更新，避免进度条闪烁
+                                await Future.delayed(
+                                  const Duration(milliseconds: 200),
+                                );
+
+                                // 拖动结束后，立即更新滑块到最终位置，即使定时器还未触发
+                                if (mounted &&
+                                    _dragSessionId == currentSessionId) {
+                                  setState(() {
+                                    _isDraggingSlider = false; // 结束拖动
+                                    _currentSliderValue =
+                                        totalDuration.inMilliseconds == 0
+                                        ? 0.0
+                                        : seekPosition.inMilliseconds /
+                                              totalDuration.inMilliseconds;
+                                  });
+                                }
+                              },
+                            ),
                           );
                         },
                       ),

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../page/setting/settings_provider.dart';
 import "../page/setting/tabs/info_icon.dart";
 import '../tv/tv_device.dart';
+import '../tv/tv_focus_nav.dart';
 
 class LyricsSettingsDrawer extends StatelessWidget {
   const LyricsSettingsDrawer({super.key});
@@ -114,17 +115,19 @@ class LyricsSettingsDrawer extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Slider(
-                            value: settings.fontSize,
-                            min: 12.0,
-                            max: 32.0,
-                            divisions: 20,
-                            label: settings.fontSize.toStringAsFixed(1),
-                            onChanged: (value) {
-                              context.read<SettingsProvider>().setFontSize(
-                                value,
-                              );
-                            },
+                          TvPointerOnlySlider(
+                            child: Slider(
+                              value: settings.fontSize,
+                              min: 12.0,
+                              max: 32.0,
+                              divisions: 20,
+                              label: settings.fontSize.toStringAsFixed(1),
+                              onChanged: (value) {
+                                context.read<SettingsProvider>().setFontSize(
+                                  value,
+                                );
+                              },
+                            ),
                           ),
                           Text(
                             '当前大小: ${settings.fontSize.toStringAsFixed(1)}',
@@ -150,17 +153,19 @@ class LyricsSettingsDrawer extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 4),
-                Slider(
-                  value: settings.lyricFontWeight.toDouble(),
-                  min: 100,
-                  max: 900,
-                  divisions: 16,
-                  label: _fontWeightLabel(settings.lyricFontWeight),
-                  onChanged: (value) {
-                    context.read<SettingsProvider>().setLyricFontWeight(
-                      value.round(),
-                    );
-                  },
+                TvPointerOnlySlider(
+                  child: Slider(
+                    value: settings.lyricFontWeight.toDouble(),
+                    min: 100,
+                    max: 900,
+                    divisions: 16,
+                    label: _fontWeightLabel(settings.lyricFontWeight),
+                    onChanged: (value) {
+                      context.read<SettingsProvider>().setLyricFontWeight(
+                        value.round(),
+                      );
+                    },
+                  ),
                 ),
                 Text(
                   '当前字重: ${_fontWeightLabel(settings.lyricFontWeight)}',
@@ -181,18 +186,20 @@ class LyricsSettingsDrawer extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Slider(
-                            value: settings.lyricVerticalSpacing,
-                            min: 0.0,
-                            max: 20.0,
-                            divisions: 20,
-                            label: settings.lyricVerticalSpacing
-                                .toStringAsFixed(1),
-                            onChanged: (value) {
-                              context
-                                  .read<SettingsProvider>()
-                                  .setLyricVerticalSpacing(value);
-                            },
+                          TvPointerOnlySlider(
+                            child: Slider(
+                              value: settings.lyricVerticalSpacing,
+                              min: 0.0,
+                              max: 20.0,
+                              divisions: 20,
+                              label: settings.lyricVerticalSpacing
+                                  .toStringAsFixed(1),
+                              onChanged: (value) {
+                                context
+                                    .read<SettingsProvider>()
+                                    .setLyricVerticalSpacing(value);
+                              },
+                            ),
                           ),
                           Text(
                             '当前间距: ${settings.lyricVerticalSpacing.toStringAsFixed(1)}',
@@ -213,17 +220,19 @@ class LyricsSettingsDrawer extends StatelessWidget {
                     ignoring: !settings.enableLyricBlur,
                     child: Opacity(
                       opacity: settings.enableLyricBlur ? 1.0 : 0.5,
-                      child: Slider(
-                        value: settings.lyricBlurStrength,
-                        min: 1.0,
-                        max: 4.0,
-                        divisions: 12,
-                        label: settings.lyricBlurStrength.toStringAsFixed(1),
-                        onChanged: (value) {
-                          context.read<SettingsProvider>().setLyricBlurStrength(
-                            value,
-                          );
-                        },
+                      child: TvPointerOnlySlider(
+                        child: Slider(
+                          value: settings.lyricBlurStrength,
+                          min: 1.0,
+                          max: 4.0,
+                          divisions: 12,
+                          label: settings.lyricBlurStrength.toStringAsFixed(1),
+                          onChanged: (value) {
+                            context
+                                .read<SettingsProvider>()
+                                .setLyricBlurStrength(value);
+                          },
+                        ),
                       ),
                     ),
                   ),

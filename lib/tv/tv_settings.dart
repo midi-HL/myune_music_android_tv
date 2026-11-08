@@ -51,7 +51,6 @@ TvInputSource tvInputSourceFromName(String? name) {
 class TvSettings extends ChangeNotifier {
   static const _gamepadIconKey = 'tv_gamepad_icon_style';
   static const _uiScaleKey = 'tv_ui_scale';
-  static const _overscanKey = 'tv_overscan';
   static const _mediaKeysKey = 'tv_remote_has_media_keys';
   static const _bindingsKey = 'tv_key_bindings';
   static const _learnedKey = 'tv_learned_keys';
@@ -64,7 +63,6 @@ class TvSettings extends ChangeNotifier {
 
   TvGamepadIconStyle _gamepadIconStyle = TvGamepadIconStyle.auto;
   double _uiScale = 1.0;
-  double _overscan = 0.05;
   bool _remoteHasMediaKeys = true;
   bool _learningMode = false;
   Map<int, TvAction> _customBindings = <int, TvAction>{};
@@ -74,7 +72,6 @@ class TvSettings extends ChangeNotifier {
 
   TvGamepadIconStyle get gamepadIconStyle => _gamepadIconStyle;
   double get uiScale => _uiScale;
-  double get overscan => _overscan;
   bool get remoteHasMediaKeys => _remoteHasMediaKeys;
   bool get learningMode => _learningMode;
   Map<int, TvAction> get customBindings => _customBindings;
@@ -89,7 +86,6 @@ class TvSettings extends ChangeNotifier {
         prefs.getString(_gamepadIconKey),
       );
       _uiScale = (prefs.getDouble(_uiScaleKey) ?? 1.0).clamp(0.8, 1.3);
-      _overscan = (prefs.getDouble(_overscanKey) ?? 0.05).clamp(0.0, 0.1);
       _remoteHasMediaKeys = prefs.getBool(_mediaKeysKey) ?? true;
 
       final bindingsRaw = prefs.getString(_bindingsKey);
@@ -147,13 +143,6 @@ class TvSettings extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setDouble(_uiScaleKey, _uiScale);
-  }
-
-  Future<void> setOverscan(double value) async {
-    _overscan = value.clamp(0.0, 0.1);
-    notifyListeners();
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setDouble(_overscanKey, _overscan);
   }
 
   Future<void> setRemoteHasMediaKeys(bool value) async {

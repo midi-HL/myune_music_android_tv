@@ -1,18 +1,23 @@
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'tv_device.dart';
+
 // Android TV 焦点导航层。
 //
-// 背景：Flutter 在 Android 上把方向键绑定到 DirectionalFocusIntent，但
-// DirectionalFocusAction 使用 primaryFocus?.inDirection(...)。应用冷启动时
-// primaryFocus 是 rootScope，没有任何可遍历的控件，方向键因此完全空转，
-// 侧边栏 / 播放栏 / 播放页 / 弹窗全部不可达。
-//
-// 本层提供四件事：
-// 1. 显式接管方向键并驱动 ReadingOrderTraversalPolicy.inDirection（带兜底）。
-// 2. 启动、路由切换、抽屉打开时自动把焦点落到真实控件上。
-// 3. 全局可见焦点框，不依赖各控件自己的 focused 样式。
-// 4. 浮层栈，返回键优先关闭音量条一类的 OverlayEntry。
+// 设计约束（依据真机回归结论）：
+// 1. 方向键按屏幕几何位置做「严格方向」查找：按左只在当前控件左侧的空间里
+//    找最近控件，按右只在右侧，上/下同理；找不到就不移动。绝不退化成
+//    ReadingOrderTraversalPolicy.next()/previous()，否则「左右」会表现为
+//    「上下」，与视觉直觉相反。
+// 2. 不绘制任何自定义高亮框。Material / Android 原生已有自己的焦点高亮，
+//    再叠加一层青色描边会出现双重高亮、甚至把整个页面框住。
+// 3. 冷启动、路由切换、抽屉 / 浮层打开时把焦点落到真实可聚焦控件上，
+//    并优先选择面积较小的叶子控件，避免焦点落在整页容器上。
+// 4. 进度条一类会吞掉四个方向键的 Slider 不参与焦点遍历（见
+//    TvPointerOnlySlider），只保留鼠标 / 触控拖动。
 
 class TvDirectionalFocusIntent extends Intent {
   const TvDirectionalFocusIntent(this.direction);
@@ -31,28 +36,11 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
       return KeyEventResult.handled;
     }
 
-    // 输入框的方向键由 EditableText 自己的 Shortcuts 处理光标移动；
-    // 这里不抢，也不重复移动焦点。
-    if (_isEditableFocus(node)) {
-      return null;
-    }
+    // 输入框的方向键由 EditableText 自己的 Shortcuts 处理光标移动，
+    // 这里必须明确放行，返回 null 会被 Shortcuts 当成 handled 吞掉按键。
+    if (_isEditableFocus(node)) return KeyEventResult.ignored;
 
-    final policy = FocusTraversalGroup.maybeOf(node.context!);
-    if (policy == null) {
-      TvFocusController.instance.scheduleEnsureFocus();
-      return KeyEventResult.handled;
-    }
-
-    final moved = policy.inDirection(node, intent.direction);
-    if (!moved) {
-      // 某些布局（列表末端、浮层）方向查找会失败，退化为按阅读顺序前进/后退。
-      if (intent.direction == TraversalDirection.down ||
-          intent.direction == TraversalDirection.right) {
-        policy.next(node);
-      } else {
-        policy.previous(node);
-      }
-    }
+    TvFocusController.instance.moveFocus(intent.direction, node);
     return KeyEventResult.handled;
   }
 
@@ -81,6 +69,13 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
   }
 }
 
+class _FocusCandidate {
+  const _FocusCandidate(this.node, this.rect);
+
+  final FocusNode node;
+  final Rect rect;
+}
+
 class TvFocusController {
   TvFocusController._();
 
@@ -89,40 +84,39 @@ class TvFocusController {
   BuildContext? rootContext;
   bool _scheduled = false;
 
-  void scheduleEnsureFocus() => _schedule(null, false);
+  void scheduleEnsureFocus() => _schedule(null);
 
   void scheduleFocusForRoute(Route<dynamic> route) =>
-      _schedule((context) => ModalRoute.of(context) == route, true);
+      _schedule((context) => ModalRoute.of(context) == route);
 
   void scheduleFocusInDrawer() => _schedule(
         (context) => context.findAncestorWidgetOfExactType<Drawer>() != null,
-        true,
       );
 
   void scheduleFocusWhere(bool Function(BuildContext) where) =>
-      _schedule(where, true);
+      _schedule(where);
 
   void openEndDrawerAndFocus(VoidCallback openDrawer) {
     openDrawer();
     scheduleFocusInDrawer();
   }
 
-  void _schedule(bool Function(BuildContext)? where, bool force) {
+  void _schedule(bool Function(BuildContext)? where) {
     if (_scheduled) return;
     _scheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scheduled = false;
       // 抽屉 / 弹窗有入场动画，等两帧再取焦点树。
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        _apply(where, force);
+        _apply(where);
       });
     });
   }
 
-  void _apply(bool Function(BuildContext)? where, bool force) {
+  void _apply(bool Function(BuildContext)? where) {
     final manager = FocusManager.instance;
-    final nodes = <FocusNode>[];
-    _collect(manager.rootScope, nodes, 0);
+    final candidates = collectCandidates(manager.rootScope);
+    if (candidates.isEmpty) return;
 
     bool matches(FocusNode node) {
       final context = node.context;
@@ -135,14 +129,13 @@ class TvFocusController {
       }
     }
 
-    if (where != null || force) {
-      for (final node in nodes) {
-        if (matches(node)) {
-          node.requestFocus();
-          return;
-        }
+    if (where != null) {
+      final matched = candidates.where((c) => matches(c.node)).toList();
+      if (matched.isNotEmpty) {
+        _pickLeaf(matched).requestFocus();
+        return;
       }
-      if (where != null) return;
+      // 目标控件尚未出现时退化为通用初始焦点，不留空焦点。
     }
 
     final current = manager.primaryFocus;
@@ -151,42 +144,135 @@ class TvFocusController {
         current.context == null ||
         !current.context!.mounted;
     if (!invalid) return;
+    _pickLeaf(candidates).requestFocus();
+  }
 
-    final context = rootContext;
-    FocusNode? first;
-    if (context != null && context.mounted) {
-      final policy = FocusTraversalGroup.maybeOf(context);
-      first = policy?.findFirstFocus(manager.rootScope);
-    }
-    if (first != null && first != manager.rootScope && first.context != null) {
-      first.requestFocus();
-      return;
-    }
-    for (final node in nodes) {
-      if (node.context != null && node.context!.mounted) {
-        node.requestFocus();
-        return;
+  // 选面积最小的可聚焦控件，避免焦点落到整页容器上导致「整个界面被框住」。
+  static FocusNode _pickLeaf(List<_FocusCandidate> candidates) {
+    _FocusCandidate? best;
+    double bestArea = double.infinity;
+    for (final candidate in candidates) {
+      final area = candidate.rect.width * candidate.rect.height;
+      if (area <= 0) continue;
+      if (area < bestArea) {
+        bestArea = area;
+        best = candidate;
       }
     }
+    return (best ?? candidates.first).node;
+  }
+
+  // 严格几何方向导航：只看目标方向那一侧的空间，不做阅读顺序兜底。
+  bool moveFocus(TraversalDirection direction, FocusNode current) {
+    final currentRect = rectOf(current);
+    if (currentRect == null) return false;
+
+    final screen = screenSize();
+    final candidates = collectCandidates(FocusManager.instance.rootScope);
+    final cur = currentRect.center;
+    final scope = current.enclosingScope;
+    const double epsilon = 2.0;
+
+    _FocusCandidate? best;
+    double bestScore = double.infinity;
+
+    for (final candidate in candidates) {
+      if (candidate.node == current) continue;
+      // 只在同一模态层内移动，避免焦点跑到抽屉 / 弹窗背后的控件上。
+      if (candidate.node.enclosingScope != scope) continue;
+      if (!candidate.rect.overlaps(Offset.zero & screen)) continue;
+      // 跳过整页级大容器。
+      if (candidate.rect.width >= screen.width * 0.92 &&
+          candidate.rect.height >= screen.height * 0.88) {
+        continue;
+      }
+      // 跳过完全包住当前控件的祖先容器。
+      if (candidate.rect.contains(cur) &&
+          (candidate.rect.width > currentRect.width + 8 ||
+              candidate.rect.height > currentRect.height + 8)) {
+        continue;
+      }
+
+      final center = candidate.rect.center;
+      late double primary;
+      late double secondary;
+      switch (direction) {
+        case TraversalDirection.left:
+          if (center.dx >= cur.dx - epsilon) continue;
+          primary = cur.dx - center.dx;
+          secondary = (center.dy - cur.dy).abs();
+          break;
+        case TraversalDirection.right:
+          if (center.dx <= cur.dx + epsilon) continue;
+          primary = center.dx - cur.dx;
+          secondary = (center.dy - cur.dy).abs();
+          break;
+        case TraversalDirection.up:
+          if (center.dy >= cur.dy - epsilon) continue;
+          primary = cur.dy - center.dy;
+          secondary = (center.dx - cur.dx).abs();
+          break;
+        case TraversalDirection.down:
+          if (center.dy <= cur.dy + epsilon) continue;
+          primary = center.dy - cur.dy;
+          secondary = (center.dx - cur.dx).abs();
+          break;
+      }
+
+      // 主方向距离为主，副方向偏移作为惩罚，避免斜着跳到很远的对角控件。
+      final score = primary + secondary * 2.0;
+      if (score < bestScore) {
+        bestScore = score;
+        best = candidate;
+      }
+    }
+
+    if (best == null) return false;
+    best.node.requestFocus();
+    return true;
+  }
+
+  static List<_FocusCandidate> collectCandidates(FocusNode root) {
+    final out = <_FocusCandidate>[];
+    _collect(root, out, 0);
+    return out;
   }
 
   // 用 children 而非 traversalChildren：FocusScopeNode 在
   // canRequestFocus=false 时 traversalChildren 为空，会漏掉抽屉 / 浮层控件。
-  static void _collect(FocusNode node, List<FocusNode> out, int depth) {
+  static void _collect(
+    FocusNode node,
+    List<_FocusCandidate> out,
+    int depth,
+  ) {
     if (depth > 24) return;
     for (final child in node.children) {
       if (child is FocusScopeNode) {
         _collect(child, out, depth + 1);
         continue;
       }
-      if (child.context != null &&
-          child.context!.mounted &&
-          child.canRequestFocus &&
-          !child.skipTraversal) {
-        out.add(child);
+      final rect = rectOf(child);
+      if (rect != null && child.canRequestFocus && !child.skipTraversal) {
+        out.add(_FocusCandidate(child, rect));
       }
       _collect(child, out, depth + 1);
     }
+  }
+
+  static Rect? rectOf(FocusNode node) {
+    final context = node.context;
+    if (context == null || !context.mounted) return null;
+    final object = context.findRenderObject();
+    if (object is! RenderBox || !object.attached || !object.hasSize) {
+      return null;
+    }
+    return object.localToGlobal(Offset.zero) & object.size;
+  }
+
+  static Size screenSize() {
+    final view = ui.PlatformDispatcher.instance.views.first;
+    final dpr = view.devicePixelRatio <= 0 ? 1.0 : view.devicePixelRatio;
+    return view.physicalSize / dpr;
   }
 }
 
@@ -232,8 +318,7 @@ class TvOverlayRegistry {
   }
 }
 
-// 给原本不可聚焦的控件（GestureDetector / MouseRegion / 自定义绘制区）
-// 补一层 Focus，并把 OK / Enter / 空格统一转成 onActivate。
+// 给原本不可聚焦的控件补一层 Focus，并把 OK / Enter / 空格统一转成 onActivate。
 class TvFocusable extends StatelessWidget {
   const TvFocusable({
     required this.child,
@@ -273,6 +358,29 @@ class TvFocusable extends StatelessWidget {
   }
 }
 
+// 让 Slider 只响应鼠标 / 触控，不参与键盘焦点遍历。
+// Flutter 的 Slider 会把上下左右四个方向键全部映射成「调整数值」，焦点一旦
+// 落上去，方向键就被它独占，无法再移动到任何其它控件（真机复现：按上/左/下
+// 焦点完全不动，按右只会把进度从 00:00 推到 00:07）。
+// TV 上进度条改为纯指针操作；快进 / 快退由遥控器媒体键与手柄扳机键承担。
+class TvPointerOnlySlider extends StatelessWidget {
+  const TvPointerOnlySlider({required this.child, super.key});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!TvDevice.isTv) return child;
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      descendantsAreFocusable: false,
+      descendantsAreTraversable: false,
+      child: child,
+    );
+  }
+}
+
 class TvFocusScope extends StatefulWidget {
   const TvFocusScope({required this.child, super.key});
 
@@ -297,8 +405,8 @@ class _TvFocusScopeState extends State<TvFocusScope> {
 
   @override
   Widget build(BuildContext context) {
-    // Actions 必须放在 Shortcuts 之上：Shortcuts 会从自身 context 或
-    // primaryFocus.context 向上查找 Actions，放在下层会找不到自定义动作。
+    // Actions 必须放在 Shortcuts 之上：Shortcuts 会从 primaryFocus.context
+    // 向上查找 Actions，放在下层会找不到自定义动作。
     return Actions(
       actions: <Type, Action<Intent>>{
         TvDirectionalFocusIntent: TvDirectionalFocusAction(),
@@ -316,126 +424,9 @@ class _TvFocusScopeState extends State<TvFocusScope> {
         },
         child: FocusTraversalGroup(
           policy: ReadingOrderTraversalPolicy(),
-          child: Stack(
-            fit: StackFit.expand,
-            children: <Widget>[
-              widget.child,
-              const Positioned.fill(child: TvFocusHighlight()),
-            ],
-          ),
+          child: widget.child,
         ),
       ),
     );
   }
-}
-
-// 全局焦点框：跟随 primaryFocus 的真实 RenderBox，任何控件都看得见焦点。
-class TvFocusHighlight extends StatefulWidget {
-  const TvFocusHighlight({super.key});
-
-  @override
-  State<TvFocusHighlight> createState() => _TvFocusHighlightState();
-}
-
-class _TvFocusHighlightState extends State<TvFocusHighlight> {
-  final ValueNotifier<Rect?> _rect = ValueNotifier<Rect?>(null);
-  bool _tracking = true;
-
-  @override
-  void initState() {
-    super.initState();
-    FocusManager.instance.addListener(_refresh);
-    _scheduleNextFrame();
-  }
-
-  // WidgetsBinding 未提供 persistent callback 的注销接口，改用可撤销的
-  // 逐帧 post-frame 链，效果相同且 dispose 后不再继续调度。
-  void _scheduleNextFrame() {
-    if (!_tracking) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_tracking) return;
-      _refresh();
-      _scheduleNextFrame();
-    });
-  }
-
-  @override
-  void dispose() {
-    _tracking = false;
-    FocusManager.instance.removeListener(_refresh);
-    _rect.dispose();
-    super.dispose();
-  }
-
-  void _refresh() {
-    if (!mounted) return;
-    final box = context.findRenderObject();
-    if (box is! RenderBox || !box.attached) return;
-
-    final node = FocusManager.instance.primaryFocus;
-    final manager = FocusManager.instance;
-    Rect? next;
-    if (node != null && node != manager.rootScope && node.context != null) {
-      final target = node.context!.findRenderObject();
-      if (target is RenderBox && target.attached && target.hasSize) {
-        final topLeft = box.globalToLocal(target.localToGlobal(Offset.zero));
-        final bottomRight = box.globalToLocal(
-          target.localToGlobal(target.size.bottomRight(Offset.zero)),
-        );
-        final rect = Rect.fromPoints(topLeft, bottomRight).inflate(5);
-        final clipped = rect.intersect(Offset.zero & box.size);
-        if (clipped.width >= 4 && clipped.height >= 4) next = clipped;
-      }
-    }
-    if (_rect.value != next) _rect.value = next;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ValueListenableBuilder<Rect?>(
-      valueListenable: _rect,
-      builder: (context, rect, _) {
-        return IgnorePointer(
-          child: CustomPaint(
-            painter: rect == null ? null : _TvFocusPainter(rect),
-            child: const SizedBox.expand(),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _TvFocusPainter extends CustomPainter {
-  const _TvFocusPainter(this.rect);
-
-  final Rect rect;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final rrect = RRect.fromRectAndRadius(rect, const Radius.circular(10));
-    canvas.drawRRect(
-      rrect,
-      Paint()
-        ..color = const Color(0xCC000000)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 6,
-    );
-    canvas.drawRRect(
-      rrect,
-      Paint()
-        ..color = const Color(0xFF66E0FF)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 3,
-    );
-    canvas.drawRRect(
-      rrect.deflate(3),
-      Paint()
-        ..color = const Color(0x2666E0FF)
-        ..style = PaintingStyle.fill,
-    );
-  }
-
-  @override
-  bool shouldRepaint(_TvFocusPainter oldDelegate) => oldDelegate.rect != rect;
 }

@@ -5,6 +5,7 @@ import 'tv_actions.dart';
 import 'tv_device.dart';
 import 'tv_gamepad_icons.dart';
 import 'tv_key_map.dart';
+import 'tv_focus_nav.dart';
 import 'tv_settings.dart';
 
 class TvSettingsTab extends StatelessWidget {
@@ -116,16 +117,6 @@ class TvSettingsTab extends StatelessWidget {
               display: '${(settings.uiScale * 100).round()}%',
               hint: '10-foot UI 字号与控件整体比例，默认 100%。',
               onChanged: settings.setUiScale,
-            ),
-            _ScaleSlider(
-              label: '过扫描安全边距',
-              value: settings.overscan,
-              min: 0.0,
-              max: 0.1,
-              divisions: 10,
-              display: '${(settings.overscan * 100).round()}%',
-              hint: '电视可能裁切画面边缘，建议保留 5%。',
-              onChanged: settings.setOverscan,
             ),
           ],
         ),
@@ -329,13 +320,15 @@ class _ScaleSlider extends StatelessWidget {
               Text(display),
             ],
           ),
-          Slider(
-            min: min,
-            max: max,
-            divisions: divisions,
-            value: value,
-            label: display,
-            onChanged: onChanged,
+          TvPointerOnlySlider(
+            child: Slider(
+              min: min,
+              max: max,
+              divisions: divisions,
+              value: value,
+              label: display,
+              onChanged: onChanged,
+            ),
           ),
           Text(hint, style: Theme.of(context).textTheme.bodySmall),
         ],

@@ -126,17 +126,6 @@ class VolumeControlState extends State<VolumeControl> {
               );
             },
           ),
-          if (TvDevice.isTv) ...[
-            const SizedBox(height: 6),
-            Text(
-              '↑↓ 调音量 · 返回关闭',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 10,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-            ),
-          ],
         ],
       ),
     );

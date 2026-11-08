@@ -6,6 +6,7 @@ import 'package:colorgram/colorgram.dart';
 import 'package:provider/provider.dart';
 
 import '../../../services/notification_service.dart';
+import '../../../tv/tv_focus_nav.dart';
 import '../../../theme/theme_provider.dart';
 import '../settings_provider.dart';
 import 'info_icon.dart';
@@ -295,13 +296,15 @@ class _CustomBackgroundSettingsState extends State<CustomBackgroundSettings> {
       subtitle: Row(
         children: [
           Expanded(
-            child: Slider(
-              min: 0.0,
-              max: 1.0,
-              divisions: 100,
-              value: clamped,
-              label: clamped.toStringAsFixed(2),
-              onChanged: onChanged,
+            child: TvPointerOnlySlider(
+              child: Slider(
+                min: 0.0,
+                max: 1.0,
+                divisions: 100,
+                value: clamped,
+                label: clamped.toStringAsFixed(2),
+                onChanged: onChanged,
+              ),
             ),
           ),
           SizedBox(
@@ -331,15 +334,17 @@ class _CustomBackgroundSettingsState extends State<CustomBackgroundSettings> {
       subtitle: Row(
         children: [
           Expanded(
-            child: Slider(
-              min: min,
-              max: max,
-              divisions: ((max - min) * 100).round(),
-              value: value,
-              label: value.toStringAsFixed(2),
-              onChanged: (v) {
-                context.read<SettingsProvider>().setBackgroundMaskOpacity(v);
-              },
+            child: TvPointerOnlySlider(
+              child: Slider(
+                min: min,
+                max: max,
+                divisions: ((max - min) * 100).round(),
+                value: value,
+                label: value.toStringAsFixed(2),
+                onChanged: (v) {
+                  context.read<SettingsProvider>().setBackgroundMaskOpacity(v);
+                },
+              ),
             ),
           ),
           SizedBox(
@@ -365,15 +370,17 @@ class _CustomBackgroundSettingsState extends State<CustomBackgroundSettings> {
       subtitle: Row(
         children: [
           Expanded(
-            child: Slider(
-              min: 0.0,
-              max: 60.0,
-              divisions: 60,
-              value: value.clamp(0.0, 60.0),
-              label: value.toStringAsFixed(0),
-              onChanged: (v) {
-                context.read<SettingsProvider>().setBackgroundImageBlur(v);
-              },
+            child: TvPointerOnlySlider(
+              child: Slider(
+                min: 0.0,
+                max: 60.0,
+                divisions: 60,
+                value: value.clamp(0.0, 60.0),
+                label: value.toStringAsFixed(0),
+                onChanged: (v) {
+                  context.read<SettingsProvider>().setBackgroundImageBlur(v);
+                },
+              ),
             ),
           ),
           SizedBox(

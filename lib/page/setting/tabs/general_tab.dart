@@ -8,6 +8,7 @@ import '../../../services/notification_service.dart';
 import '../../playlist/playlist_content_notifier.dart';
 
 import '../../../tv/tv_device.dart';
+import '../../../tv/tv_focus_nav.dart';
 import '../theme_selection_screen.dart';
 import '../../../theme/theme_provider.dart';
 import '../settings_provider.dart';
@@ -153,15 +154,17 @@ class _GeneralTabState extends State<GeneralTab> {
                     ),
                   ],
                 ),
-                Slider(
-                  min: 0.55,
-                  max: 1.0,
-                  divisions: 9,
-                  value: settings.androidUiScale,
-                  label: '${(settings.androidUiScale * 100).round()}%',
-                  onChanged: (value) {
-                    context.read<SettingsProvider>().setAndroidUiScale(value);
-                  },
+                TvPointerOnlySlider(
+                  child: Slider(
+                    min: 0.55,
+                    max: 1.0,
+                    divisions: 9,
+                    value: settings.androidUiScale,
+                    label: '${(settings.androidUiScale * 100).round()}%',
+                    onChanged: (value) {
+                      context.read<SettingsProvider>().setAndroidUiScale(value);
+                    },
+                  ),
                 ),
                 Text(
                   '仅影响应用内布局，不改系统 DPI；越小显示内容越多',

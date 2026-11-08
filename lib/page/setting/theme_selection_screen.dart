@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../../theme/theme_provider.dart';
+import '../../tv/tv_focus_nav.dart';
 import 'settings_provider.dart';
 
 class ThemeSelectionScreen extends StatelessWidget {
@@ -229,13 +230,15 @@ class ThemeSelectionScreen extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              child: Slider(
-                                value: currentHue,
-                                min: 0.0,
-                                max: 360.0,
-                                onChanged: (newValue) {
-                                  hueNotifier.value = newValue;
-                                },
+                              child: TvPointerOnlySlider(
+                                child: Slider(
+                                  value: currentHue,
+                                  min: 0.0,
+                                  max: 360.0,
+                                  onChanged: (newValue) {
+                                    hueNotifier.value = newValue;
+                                  },
+                                ),
                               ),
                             ),
                           ],
