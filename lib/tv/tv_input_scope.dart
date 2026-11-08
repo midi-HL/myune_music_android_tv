@@ -8,7 +8,7 @@ import '../layout/navigation_notifier.dart';
 import '../page/playlist/playlist_content_notifier.dart';
 import '../page/song_detail_page.dart';
 import 'tv_actions.dart';
-import 'tv_focus.dart';
+import 'tv_focus_nav.dart';
 import 'tv_key_map.dart';
 import 'tv_navigation.dart';
 import 'tv_settings.dart';
@@ -187,7 +187,9 @@ class _TvInputScopeState extends State<TvInputScope> {
         notifier.togglePlayMode();
         break;
       case TvAction.openQueue:
-        tvScaffoldKey.currentState?.openEndDrawer();
+        TvFocusController.instance.openEndDrawerAndFocus(
+          () => tvScaffoldKey.currentState?.openEndDrawer(),
+        );
         break;
       case TvAction.openPlayerPage:
         tvRootNavigatorKey.currentState?.push(
@@ -213,6 +215,6 @@ class _TvInputScopeState extends State<TvInputScope> {
 
   @override
   Widget build(BuildContext context) {
-    return TvFocusTraversalGroup(child: widget.child);
+    return TvFocusScope(child: widget.child);
   }
 }

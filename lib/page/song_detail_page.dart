@@ -16,6 +16,8 @@ import '../widgets/song_detail_page/app_window_title_bar.dart';
 import './setting/settings_provider.dart';
 import '../widgets/playing_queue_drawer.dart';
 import '../widgets/lyrics_settings_drawer.dart';
+import '../tv/tv_device.dart';
+import '../tv/tv_focus_nav.dart';
 import 'playlist/playlist_models.dart';
 
 // 公共模糊背景组件
@@ -169,7 +171,11 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
     final useBlurBackground = settings.useBlurBackground;
-    final enableDynamicBackground = settings.enableDynamicBackground;
+    // mesh_gradient 的持续动画在 Android TV GPU 上会产生移动黑块；
+    // TV 分支强制走静态背景，桌面与手机端行为不变。
+    final isTv = TvDevice.isTv;
+    final enableDynamicBackground =
+        settings.enableDynamicBackground && !isTv;
 
     // 动画开关逻辑，通过延迟到帧后来避免 build 期间的副作用
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -255,23 +261,31 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
           );
         }
 
-        // 静态高斯模糊背景部分
+        // 静态背景：TV 上完全跳过 ImageFiltered 与 MeshGradient
+        // （Android TV GPU 上会产生黑色移动色块），改用降亮度的封面 + 遮罩层。
+        // 桌面 / 手机端保留原来的 40 sigma 高斯模糊。
+        final albumImage = Image.memory(
+          currentSong!.albumArt!,
+          fit: BoxFit.cover,
+          color: isTv ? Colors.white.withValues(alpha: 0.45) : null,
+          colorBlendMode: isTv ? ui.BlendMode.modulate : null,
+          errorBuilder: (context, error, stackTrace) =>
+              Container(color: Theme.of(context).colorScheme.surface),
+        );
         return Stack(
           fit: StackFit.expand,
           children: [
-            ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(
-                sigmaX: 40,
-                sigmaY: 40,
-                tileMode: TileMode.decal,
+            if (isTv)
+              albumImage
+            else
+              ImageFiltered(
+                imageFilter: ui.ImageFilter.blur(
+                  sigmaX: 40,
+                  sigmaY: 40,
+                  tileMode: TileMode.decal,
+                ),
+                child: albumImage,
               ),
-              child: Image.memory(
-                currentSong!.albumArt!,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                    Container(color: Theme.of(context).colorScheme.surface),
-              ),
-            ),
             IgnorePointer(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
@@ -346,7 +360,10 @@ class _SongDetailPageState extends State<SongDetailPage> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
-    final autoHideEnabled = settings.autoHidePlayPageComponents;
+    // TV 上禁用「鼠标静止后隐藏控件」：否则 IgnorePointer 会让遥控器
+    // 永远无法触达播放页按钮。
+    final autoHideEnabled =
+        settings.autoHidePlayPageComponents && !TvDevice.isTv;
 
     // 监听设置变化
     if (autoHideEnabled != _lastSettingValue) {
@@ -401,6 +418,8 @@ class _SongDetailPageState extends State<SongDetailPage> {
                         return AppWindowTitleBar(
                           onSettingsPressed: () {
                             Scaffold.of(context).openDrawer();
+                            TvFocusController.instance
+                                .scheduleFocusInDrawer();
                           },
                         );
                       },

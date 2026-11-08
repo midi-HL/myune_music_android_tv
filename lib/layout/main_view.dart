@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
 
 import '../page/pages/play_list.dart';
@@ -13,6 +14,8 @@ import '../page/pages/audio_analysis_page.dart';
 import '../page/playlist/playlist_content_notifier.dart';
 import '../page/setting/settings_provider.dart';
 import '../widgets/custom_background_layer.dart';
+import '../tv/tv_device.dart';
+import '../tv/tv_focus_nav.dart';
 import 'navigation_notifier.dart';
 
 class PageEntry {
@@ -159,6 +162,57 @@ class _MainViewState extends State<MainView> {
     );
   }
 
+  // 非 TV 沿用 NavigationRail；TV 上换成每项都有显式 Focus 节点的侧边栏，
+  // 第一项 autofocus，保证冷启动时方向键有起点。
+  Widget _buildRail({
+    required List<PageEntry> entries,
+    required int currentIndex,
+    required ValueChanged<int> onSelect,
+    required Color railColor,
+  }) {
+    if (!TvDevice.isTv) {
+      return SafeArea(
+        child: NavigationRail(
+          backgroundColor: railColor,
+          selectedIndex: currentIndex,
+          onDestinationSelected: onSelect,
+          destinations: <NavigationRailDestination>[
+            for (int i = 0; i < entries.length; i++)
+              _buildDest(entries[i], i, currentIndex),
+          ],
+        ),
+      );
+    }
+
+    return SafeArea(
+      child: Container(
+        width: 116,
+        color: railColor,
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            for (int i = 0; i < entries.length; i++)
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 6,
+                  vertical: 4,
+                ),
+                child: TvFocusable(
+                  autofocus: i == 0,
+                  debugLabel: 'tv-rail-${entries[i].routeName}',
+                  onActivate: () => onSelect(i),
+                  child: _TvRailItem(
+                    entry: entries[i],
+                    selected: i == currentIndex,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final playlistNotifier = context.read<PlaylistContentNotifier>();
@@ -177,6 +231,58 @@ class _MainViewState extends State<MainView> {
       currentIndex = 0;
     }
 
+    void selectDestination(int index) {
+      switch (visibleEntries[index].page) {
+        case Playlist _:
+          playlistNotifier.clearActiveDetailView();
+          break;
+        case AllSongs _:
+          playlistNotifier.setActiveAllSongsView();
+          break;
+        case SongDetails _:
+          playlistNotifier.clearViewingSong();
+          break;
+      }
+      if (currentIndex != index) {
+        navigationNotifier.navigateTo(visibleEntries[index].routeName);
+      }
+    }
+
+    final railColor = CustomBackgroundSurfaces.railColor(
+      settings,
+      Theme.of(context).colorScheme.surfaceContainerHighest,
+    );
+
+    Widget buildNavigator(bool instant) {
+      return Navigator(
+        key: navigationNotifier.navigatorKey,
+        onGenerateRoute: (routeSettings) {
+          final entry = visibleEntries.firstWhere(
+            (e) => e.routeName == routeSettings.name,
+            orElse: () => visibleEntries.first,
+          );
+          return PageRouteBuilder(
+            pageBuilder: (context, _, __) => entry.page,
+            transitionDuration: instant
+                ? Duration.zero
+                : const Duration(milliseconds: 150),
+            reverseTransitionDuration: instant
+                ? Duration.zero
+                : const Duration(milliseconds: 150),
+            transitionsBuilder: (context, animation, secondaryAnimation, child) {
+              if (instant) return child;
+              final curved = CurvedAnimation(
+                parent: animation,
+                curve: Curves.easeInOut,
+                reverseCurve: Curves.easeInOut,
+              );
+              return FadeTransition(opacity: curved, child: child);
+            },
+          );
+        },
+      );
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         // 横屏宽屏时把歌曲详情固定成右栏，形成 master-detail。
@@ -187,55 +293,13 @@ class _MainViewState extends State<MainView> {
         if (isWideLandscape) {
           return Row(
             children: [
-              SafeArea(
-                child: NavigationRail(
-                  backgroundColor: CustomBackgroundSurfaces.railColor(
-                    settings,
-                    Theme.of(context).colorScheme.surfaceContainerHighest,
-                  ),
-                  selectedIndex: currentIndex,
-                  onDestinationSelected: (int index) {
-                    switch (visibleEntries[index].page) {
-                      case Playlist _:
-                        playlistNotifier.clearActiveDetailView();
-                        break;
-                      case AllSongs _:
-                        playlistNotifier.setActiveAllSongsView();
-                        break;
-                      case SongDetails _:
-                        playlistNotifier.clearViewingSong();
-                        break;
-                    }
-                    if (currentIndex != index) {
-                      navigationNotifier.navigateTo(
-                        visibleEntries[index].routeName,
-                      );
-                    }
-                  },
-                  destinations: [
-                    for (int i = 0; i < visibleEntries.length; i++)
-                      _buildDest(visibleEntries[i], i, currentIndex),
-                  ],
-                ),
+              _buildRail(
+                entries: visibleEntries,
+                currentIndex: currentIndex,
+                onSelect: selectDestination,
+                railColor: railColor,
               ),
-              Expanded(
-                flex: 3,
-                child: Navigator(
-                  key: navigationNotifier.navigatorKey,
-                  onGenerateRoute: (settings) {
-                    final entry = visibleEntries.firstWhere(
-                      (e) => e.routeName == settings.name,
-                      orElse: () => visibleEntries.first,
-                    );
-                    return PageRouteBuilder(
-                      pageBuilder: (context, _, __) => entry.page,
-                      transitionDuration: Duration.zero,
-                      reverseTransitionDuration: Duration.zero,
-                      transitionsBuilder: (context, _, __, child) => child,
-                    );
-                  },
-                ),
-              ),
+              Expanded(flex: 3, child: buildNavigator(true)),
               const VerticalDivider(width: 1),
               const SizedBox(width: 420, child: SongDetails()),
             ],
@@ -243,80 +307,57 @@ class _MainViewState extends State<MainView> {
         }
         return Row(
           children: [
-            SafeArea(
-              child: NavigationRail(
-                backgroundColor: CustomBackgroundSurfaces.railColor(
-                  settings,
-                  Theme.of(context).colorScheme.surfaceContainerHighest,
-                ),
-                extended: false,
-                selectedIndex: currentIndex,
-                onDestinationSelected: (int index) {
-                  switch (visibleEntries[index].page) {
-                    case Playlist _:
-                      playlistNotifier.clearActiveDetailView();
-                      break;
-                    case AllSongs _:
-                      playlistNotifier.setActiveAllSongsView();
-                      break;
-                    case SongDetails _:
-                      playlistNotifier.clearViewingSong();
-                      break;
-                  }
-
-                  if (currentIndex == index) return;
-
-                  navigationNotifier.navigateTo(
-                    visibleEntries[index].routeName,
-                  );
-                },
-                destinations: [
-                  for (int i = 0; i < visibleEntries.length; i++)
-                    _buildDest(visibleEntries[i], i, currentIndex),
-                ],
-              ),
+            _buildRail(
+              entries: visibleEntries,
+              currentIndex: currentIndex,
+              onSelect: selectDestination,
+              railColor: railColor,
             ),
             Expanded(
               child: visibleEntries.isNotEmpty
-                  ? Navigator(
-                      key: navigationNotifier.navigatorKey,
-                      // initialRoute: visibleEntries[_currentIndex].routeName,
-                      onGenerateRoute: (settings) {
-                        // 查找与路由匹配的条目
-                        final entry = visibleEntries.firstWhere(
-                          (e) => e.routeName == settings.name,
-                          orElse: () => visibleEntries.first,
-                        );
-
-                        return PageRouteBuilder(
-                          pageBuilder:
-                              (context, animation, secondaryAnimation) =>
-                                  entry.page,
-                          transitionDuration: const Duration(milliseconds: 150),
-                          reverseTransitionDuration: const Duration(
-                            milliseconds: 150,
-                          ),
-                          transitionsBuilder:
-                              (context, animation, secondaryAnimation, child) {
-                                final curvedAnimation = CurvedAnimation(
-                                  parent: animation,
-                                  curve: Curves.easeInOut,
-                                  reverseCurve: Curves.easeInOut,
-                                );
-
-                                return FadeTransition(
-                                  opacity: curvedAnimation,
-                                  child: child,
-                                );
-                              },
-                        );
-                      },
-                    )
+                  ? buildNavigator(false)
                   : const SizedBox.shrink(),
             ),
           ],
         );
       },
+    );
+  }
+}
+
+class _TvRailItem extends StatelessWidget {
+  const _TvRailItem({required this.entry, required this.selected});
+
+  final PageEntry entry;
+  final bool selected;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final color = selected ? scheme.primary : scheme.onSurfaceVariant;
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: selected
+            ? scheme.primary.withValues(alpha: 0.18)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(selected ? entry.selectedIcon : entry.icon, size: 21, color: color),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              entry.label,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, color: color),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

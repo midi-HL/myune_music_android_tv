@@ -3,6 +3,9 @@ import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../tv/tv_device.dart';
+import '../tv/tv_focus_nav.dart';
+
 class HoverOverlayControl extends StatefulWidget {
   final IconData icon;
   final Color iconColor;
@@ -34,12 +37,18 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
   final LayerLink _layerLink = LayerLink();
   OverlayEntry? _overlayEntry;
   bool _isHovering = false;
+  late final VoidCallback _closeCallback;
+
+  @override
+  void initState() {
+    super.initState();
+    _closeCallback = _removeOverlay;
+  }
 
   void _showOverlay() {
     if (_overlayEntry != null) return;
     _overlayEntry = OverlayEntry(
       builder: (context) {
-        // 浮层上的MouseRegion，用于当鼠标移入浮层时保持其可见
         return CompositedTransformFollower(
           link: _layerLink,
           offset: widget.overlayOffset,
@@ -52,7 +61,7 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
                 onExit: (_) => _setHovering(false),
                 child: Material(
                   elevation: 4,
-                  borderRadius: BorderRadius.circular(6),
+                  borderRadius: BorderRadius.circular(8),
                   color: Theme.of(context).colorScheme.surfaceContainerLow,
                   child: widget.overlayContentBuilder(context),
                 ),
@@ -63,9 +72,19 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
       },
     );
     Overlay.of(context).insert(_overlayEntry!);
+    // 返回键优先关闭浮层，而不是直接退页面 / 退出应用。
+    TvOverlayRegistry.instance.add(_closeCallback);
+    if (TvDevice.isTv) {
+      TvFocusController.instance.scheduleFocusWhere(
+        (context) =>
+            context.widget is Slider ||
+            context.findAncestorWidgetOfExactType<Slider>() != null,
+      );
+    }
   }
 
   void _removeOverlay() {
+    TvOverlayRegistry.instance.remove(_closeCallback);
     _overlayEntry?.remove();
     _overlayEntry = null;
   }
@@ -92,12 +111,10 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
   Widget build(BuildContext context) {
     return CompositedTransformTarget(
       link: _layerLink,
-      // 监听悬浮在图标上的滚轮事件
       child: Listener(
         onPointerSignal: (event) {
           if (event is PointerScrollEvent) {
             widget.onPointerSignal?.call(event);
-            // 主动通知浮层UI进行重绘，以反映最新状态
             _overlayEntry?.markNeedsBuild();
           }
         },
@@ -116,29 +133,27 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
               size: widget.size,
             ),
             onPressed: () {
-              // 触屏没有 hover：第一次点击先展开浮层，浮层内提供具体控件。
-              if (Platform.isAndroid && _overlayEntry == null) {
-                _showOverlay();
-                return;
-              }
-              // 如果外部传入了点击事件的处理函数
-              if (widget.onIconPressed != null) {
-                // 先执行外部的函数
-                widget.onIconPressed!();
-                // 浮层展开后再次点击收起，否则只刷新浮层状态。
-                if (Platform.isAndroid) {
-                  _removeOverlay();
-                } else {
+              final hasExternal = widget.onIconPressed != null;
+              if (!Platform.isAndroid) {
+                if (hasExternal) {
+                  widget.onIconPressed!();
                   _overlayEntry?.markNeedsBuild();
-                }
-              } else {
-                // 如果外部没有传入处理函数，就执行默认逻辑
-                if (_overlayEntry == null) {
+                } else if (_overlayEntry == null) {
                   _showOverlay();
                 } else {
                   _removeOverlay();
                 }
+                return;
               }
+              // 触屏 / TV 遥控器：第一次按键展开浮层并自动聚焦竖条。
+              if (_overlayEntry == null) {
+                _showOverlay();
+                return;
+              }
+              if (hasExternal) {
+                widget.onIconPressed!();
+              }
+              _removeOverlay();
             },
           ),
         ),

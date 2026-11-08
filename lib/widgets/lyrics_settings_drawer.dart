@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../page/setting/settings_provider.dart';
 import "../page/setting/tabs/info_icon.dart";
+import '../tv/tv_device.dart';
 
 class LyricsSettingsDrawer extends StatelessWidget {
   const LyricsSettingsDrawer({super.key});
@@ -27,6 +28,8 @@ class LyricsSettingsDrawer extends StatelessWidget {
     final settings = context.watch<SettingsProvider>();
 
     return Drawer(
+      // 10-foot UI：电视上把抽屉加宽，避免滑块与分段按钮挤在窄条里。
+      width: TvDevice.isTv ? 420 : null,
       child: SafeArea(
         child: SingleChildScrollView(
           child: Padding(

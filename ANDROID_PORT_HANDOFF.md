@@ -297,3 +297,45 @@ TV 工作改在**新仓库**进行，原仓库 `midi-HL/myune_music_android` 保
 - 手柄 A / ✕ 若某些设备只上报 `KEYCODE_BUTTON_A` 而不上报 `DPAD_CENTER`，
   需在学习模式里把它绑定到「确认」类动作；标准 Android TV 设备通常已规范化。
 - 本机无 Flutter / Dart / Kotlin 工具链，编译与 APK 校验全部交由 GitHub Actions。
+
+## 14. 真机回归后的修复（2026-11-08 下午）
+
+用户用海外标准 Android TV + 遥控器实测：`fc84dfe` 版本**所有界面方向键完全失效**（侧边栏、底部播放栏、播放页控制、歌词跳转、播放列表抽屉、音效设置弹窗、循环按钮、音频条），只能用鼠标；播放页开启动态背景后出现黑色移动色块；音量条被移植成横向 Slider + 加减键；歌词显示设置入口随窗口标题栏一起消失。
+
+### 14.1 方向键失效的根因与修复
+
+Flutter 在 Android 上确实把方向键绑定 `DirectionalFocusIntent`、`select/enter/space/gameButtonA` 绑定 `ActivateIntent`，默认策略 `ReadingOrderTraversalPolicy`；但 `DirectionalFocusAction` 使用 `primaryFocus?.inDirection(...)`。应用冷启动时 `primaryFocus` 是 `rootScope`，没有任何可遍历控件获得焦点，方向键全部空转，OK 键也无处激活。原 `TvInputScope` 只把方向键放行给 Flutter、未主动建立焦点，因此整条链路始终没有起点。
+
+新增 `lib/tv/tv_focus_nav.dart`：
+
+- `TvFocusScope`：TV 分支的 `Actions > Shortcuts > FocusTraversalGroup > Stack`，显式把四个方向键映射到自定义 `TvDirectionalFocusIntent`，由 `TvDirectionalFocusAction` 调用 `policy.inDirection()`；方向查找失败时退化为 `next/previous`。`Actions` 放在 `Shortcuts` 之上，保证自定义动作能被查找到。
+- `TvFocusController`：启动、路由 `didPush/didPop`、抽屉打开后两帧自动把焦点落到真实控件；`findFirstFocus` + 基于 `FocusNode.children` 的焦点树遍历（含 `FocusScope` 的浮层 / 抽屉节点）；`ModalRoute.of(context)` 过滤对话框控件。
+- `TvFocusNavigatorObserver`：挂到 `MaterialApp.navigatorObservers`，所有 `showDialog` / `showMenu` / 播放页路由自动聚焦。
+- `TvFocusHighlight`：跟随 `primaryFocus` 真实 `RenderBox` 的全局焦点框（深色底描边 + 青色高亮），不依赖控件自身的 focused 样式，任何控件都看得见焦点。
+- `TvFocusable`：给原本无 Focus 节点的控件补 `Focus` + `ActivateIntent` 回调。
+- `TvOverlayRegistry`：返回键优先关闭 `OverlayEntry` 浮层，再逐级 `Navigator.maybePop()`。
+- `main_view.dart`：TV 分支改用自建可聚焦侧边栏（每项 `TvFocusable`，第一项 `autofocus`），非 TV 继续用 `NavigationRail`。
+
+`Shortcuts` 的层级高于输入框 / Slider 自身的 `Shortcuts`，因此文本光标移动与滑块调节仍由 Flutter 原生处理，不会被抢。播放页的「鼠标静止 5 秒隐藏控件」在 TV 上强制关闭，避免 `IgnorePointer` 让控件失去可达性。
+
+### 14.2 音量条
+
+`lib/widgets/volume_control_state.dart` 删除 Android 分支的横向 Slider + `-` / `+` 按钮，全平台恢复桌面端的 `RotatedBox(quarterTurns: -1)` 竖向 Slider + 数值显示。`lib/widgets/hover_overlay_control.dart` 在 TV 上：点一下音量图标展开竖条并自动把焦点交到 Slider（`autofocus` + `scheduleFocusWhere`），方向键上下调音量，返回键关闭；浮层登记到 `TvOverlayRegistry`。浮层内不再误触静音。
+
+### 14.3 歌词显示设置入口
+
+`LyricsSettingsDrawer` 一直挂在 `SongDetailPage` 的 `Scaffold.drawer`，但桌面端入口在 `AppWindowTitleBar`，而该组件在 Android 返回 `SizedBox.shrink()`，导致入口消失。现在在 `lib/widgets/song_detail_page/playbar.dart` 横屏与竖屏的控制排都与启停 / 上一首下一首同一排补上「歌词显示设置」按钮（`Icons.text_format`），点击 `openDrawer()` 并自动聚焦抽屉；TV 上抽屉宽度放宽到 420。
+
+### 14.4 播放页黑色移动色块
+
+根因是 `song_detail_page.dart` 的 `MeshGradient`（`mesh_gradient: ^1.3.8`）由 `AnimationController.repeat(reverse: true)` 每帧重建 4 个近黑色点，在 Android TV GPU 上产生移动黑块；歌词与封面是上层 child 所以正常。TV 分支强制 `enableDynamicBackground = false` 并停止动画，静态背景也跳过 `ImageFiltered`/大半径 blur，改用降亮度封面 + 遮罩层；桌面 / 手机端保留 40 sigma 高斯模糊与动态背景。
+
+### 14.5 应用名与图标
+
+- 显示名定为 **星音 StarNote**（用户选定），由 workflow 注入 `android:label`，手机与 TV 桌面共用。
+- 原项目图标是深蓝圆底 + 白色八分音符 + 四角星芒（`logo.png` 1024²、`icon.png` 430² 单色版）。据此重新生成并提交 `ci/branding/`：`tv_banner.png`（320×180，含中文名与英文名）、5 个密度的 `ic_launcher*.png` / `ic_launcher_round*.png`。
+- workflow 在生成 runner 后复制这些资源、删除模板 `mipmap-anydpi-v26/*.xml`（避免 Adaptive Icon 覆盖品牌图标），并校验注入结果。
+
+### 14.6 回滚
+
+`baseline-4168e51-pre-tv` 与 `baseline-558a71f-0713` 两个 tag 不变；本节改动是 `fc84dfe` 之后的新提交，可用 `git revert <新提交>` 回到 `fc84dfe`（第一版 TV，方向键不可用），或直接 checkout 上述 tag 回到移植前。

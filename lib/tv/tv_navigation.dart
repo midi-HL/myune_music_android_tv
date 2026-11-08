@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'tv_focus_nav.dart';
+
 // 根 Navigator 与 Scaffold 的全局键：输入层不依赖页面 context 即可
 // 打开播放队列、播放页，或处理返回键。
 final GlobalKey<NavigatorState> tvRootNavigatorKey =
@@ -24,6 +26,9 @@ class TvBackHandler {
       return;
     }
     _lastHandled = now;
+
+    // 音量竖条等 OverlayEntry 不是 Navigator route，返回键先关它们。
+    if (TvOverlayRegistry.instance.closeTop()) return;
 
     final navigator = tvRootNavigatorKey.currentState;
     if (navigator == null) return;

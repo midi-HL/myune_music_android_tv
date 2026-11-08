@@ -1,10 +1,10 @@
-import 'dart:io';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:provider/provider.dart';
+
 import '../page/playlist/playlist_content_notifier.dart';
+import '../tv/tv_device.dart';
 import 'hover_overlay_control.dart';
 
 class VolumeControl extends StatefulWidget {
@@ -24,11 +24,6 @@ class VolumeControl extends StatefulWidget {
 }
 
 class VolumeControlState extends State<VolumeControl> {
-  @override
-  void initState() {
-    super.initState();
-  }
-
   // 处理滚轮事件，增加/减少音量
   void _handleScroll(
     PointerSignalEvent event,
@@ -62,11 +57,15 @@ class VolumeControlState extends State<VolumeControl> {
           icon: _getVolumeIcon(playlistNotifier.volume),
           iconColor: widget.iconColor,
           size: widget.size,
-          onIconPressed: playlistNotifier.toggleMute,
+          // TV 上点音量图标只负责展开 / 收起竖条，不再误触静音。
+          onIconPressed: TvDevice.isTv
+              ? null
+              : () => playlistNotifier.toggleMute(),
           onPointerSignal: (event) => _handleScroll(event, playlistNotifier),
-          overlayOffset: const Offset(0, -170),
-          overlayConstraints: BoxConstraints(
-            maxWidth: Platform.isAndroid ? 180 : 40,
+          overlayOffset: const Offset(0, -190),
+          overlayConstraints: const BoxConstraints(
+            maxWidth: 64,
+            maxHeight: 210,
           ),
           overlayContentBuilder: (context) {
             return _buildOverlayContent(playlistNotifier);
@@ -76,61 +75,26 @@ class VolumeControlState extends State<VolumeControl> {
     );
   }
 
+  // 与桌面端一致：竖向音量条，无加减键。
   Widget _buildOverlayContent(PlaylistContentNotifier playlistNotifier) {
-    if (Platform.isAndroid) {
-      return Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                IconButton(
-                  onPressed: () => playlistNotifier.setVolume(
-                    (playlistNotifier.volume - 5).clamp(0.0, 100.0),
-                  ),
-                  icon: const Icon(Icons.remove),
-                ),
-                Expanded(
-                  child: Slider(
-                    min: 0,
-                    max: 100,
-                    value: playlistNotifier.volume,
-                    onChanged: (value) => playlistNotifier.setVolume(value),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => playlistNotifier.setVolume(
-                    (playlistNotifier.volume + 5).clamp(0.0, 100.0),
-                  ),
-                  icon: const Icon(Icons.add),
-                ),
-              ],
-            ),
-            Text('${playlistNotifier.volume.round()}%'),
-          ],
-        ),
-      );
-    }
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 8),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            width: 40,
-            height: 120,
+            width: 44,
+            height: 130,
             child: RotatedBox(
               quarterTurns: -1, // 横向滑块旋转成垂直显示
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
                   trackHeight: 6,
                   thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 8,
+                    enabledThumbRadius: 9,
                   ),
                   overlayShape: const RoundSliderOverlayShape(
-                    overlayRadius: 12,
+                    overlayRadius: 14,
                   ),
                 ),
                 child: Consumer<PlaylistContentNotifier>(
@@ -139,6 +103,8 @@ class VolumeControlState extends State<VolumeControl> {
                       value: notifier.volume,
                       min: 0,
                       max: 100,
+                      // TV 上浮层出现即把焦点交到竖条，方向键上下直接调音量。
+                      autofocus: TvDevice.isTv,
                       onChanged: (value) {
                         notifier.setVolume(value);
                       },
@@ -154,12 +120,23 @@ class VolumeControlState extends State<VolumeControl> {
               return Text(
                 '${(notifier.volume).round()}',
                 style: const TextStyle(
-                  fontSize: 13,
+                  fontSize: 15,
                   fontWeight: FontWeight.w500,
                 ),
               );
             },
           ),
+          if (TvDevice.isTv) ...[
+            const SizedBox(height: 6),
+            Text(
+              '↑↓ 调音量 · 返回关闭',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 10,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );

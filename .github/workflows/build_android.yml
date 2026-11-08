@@ -155,8 +155,8 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          import struct
-          import zlib
+          from shutil import copyfile
+          import re
 
           manifest = Path("android/app/src/main/AndroidManifest.xml")
           text = manifest.read_text(encoding="utf-8")
@@ -225,6 +225,20 @@ jobs:
               )
               print("injected android:banner")
 
+          # 应用显示名：手机桌面与 TV 启动器共用「星音 StarNote」。
+          app_label = 'android:label="星音 StarNote"'
+          if app_label not in text:
+              app_start = text.find("<application")
+              if app_start < 0:
+                  raise SystemExit("cannot locate <application> tag")
+              app_end = text.find(">", app_start)
+              if app_end < 0:
+                  raise SystemExit("cannot locate end of <application> tag")
+              tag = re.sub(r'\s+android:label="[^"]*"', "", text[app_start:app_end])
+              tag = tag + "\n        " + app_label
+              text = text[:app_start] + tag + text[app_end:]
+              print("injected android:label")
+
           manifest.write_text(text, encoding="utf-8")
 
           final = manifest.read_text(encoding="utf-8")
@@ -234,49 +248,38 @@ jobs:
               "android.hardware.touchscreen",
               "android.intent.category.LEANBACK_LAUNCHER",
               "android:banner=",
+              'android:label="星音 StarNote"',
           ):
               if token not in final:
                   raise SystemExit("TV manifest patch incomplete: missing " + token)
 
-          # 320x180 xhdpi TV banner：仅用标准库生成 PNG，不引入图片工具。
-          W, H = 320, 180
-          rows = []
-          for y in range(H):
-              row = bytearray(b"\x00")
-              for x in range(W):
-                  t = x / (W - 1)
-                  r = int(18 + 30 * t)
-                  g = int(24 + 46 * t)
-                  b = int(38 + 72 * t)
-                  dx = x - W / 2
-                  dy = y - H / 2
-                  d = (dx * dx + dy * dy) ** 0.5
-                  if 42 <= d <= 48:
-                      r, g, b = 235, 240, 250
-                  if -14 <= dx <= 16 and abs(dy) <= 14 and dx <= 16 - abs(dy):
-                      r, g, b = 235, 240, 250
-                  row += bytes((r, g, b))
-              rows.append(bytes(row))
-
-          def chunk(tag, data):
-              return (
-                  struct.pack(">I", len(data))
-                  + tag
-                  + data
-                  + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-              )
-
-          png = (
-              b"\x89PNG\r\n\x1a\n"
-              + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
-              + chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
-              + chunk(b"IEND", b"")
-          )
-          banner_dir = Path("android/app/src/main/res/drawable-xhdpi")
+          # 品牌资源：原项目的深蓝圆底 / 白色音符星芒，重绘为 320x180
+          # TV banner 与各密度启动图标。资源已随源码提交，不在 CI 里生成。
+          branding = Path("ci/branding")
+          banner_src = branding / "tv_banner.png"
+          if not banner_src.exists():
+              raise SystemExit("missing ci/branding/tv_banner.png")
+          res = Path("android/app/src/main/res")
+          banner_dir = res / "drawable-xhdpi"
           banner_dir.mkdir(parents=True, exist_ok=True)
-          banner_path = banner_dir / "tv_banner.png"
-          banner_path.write_bytes(png)
-          print("generated %s (%d bytes)" % (banner_path, len(png)))
+          copyfile(banner_src, banner_dir / "tv_banner.png")
+
+          for density in ("mdpi", "hdpi", "xhdpi", "xxhdpi", "xxxhdpi"):
+              target_dir = res / ("mipmap-" + density)
+              target_dir.mkdir(parents=True, exist_ok=True)
+              for prefix in ("ic_launcher", "ic_launcher_round"):
+                  src = branding / ("%s-%s.png" % (prefix, density))
+                  if not src.exists():
+                      raise SystemExit("missing branding asset: %s" % src)
+                  copyfile(src, target_dir / (prefix + ".png"))
+
+          # 模板的 Adaptive Icon XML 会覆盖 PNG，删除后使用上面的品牌图标。
+          anydpi = res / "mipmap-anydpi-v26"
+          if anydpi.exists():
+              for xml in list(anydpi.glob("*.xml")):
+                  xml.unlink()
+                  print("removed %s" % xml.name)
+          print("branding applied: tv_banner.png + launcher icons")
           PY
 
       # 可选正式签名：4 个 secrets 齐全时切换 release signingConfig；

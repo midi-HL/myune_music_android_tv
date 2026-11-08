@@ -10,6 +10,7 @@ import 'play_pause_button.dart';
 import 'play_mode_button.dart';
 import '../page/setting/settings_provider.dart';
 import '../utils/pixel_snap.dart';
+import '../tv/tv_focus_nav.dart';
 import 'custom_background_layer.dart';
 
 // 格式化时间函数
@@ -407,8 +408,10 @@ class _PlaybarState extends State<Playbar> {
                         tooltip: '播放列表',
                         padding: const EdgeInsets.only(top: 1.5),
                         onPressed: () {
-                          // 打开右侧抽屉
+                          // 打开右侧抽屉，并把焦点移到抽屉内第一个控件。
                           Scaffold.of(context).openEndDrawer();
+                          TvFocusController.instance
+                              .scheduleFocusInDrawer();
                         },
                       ),
                     ],

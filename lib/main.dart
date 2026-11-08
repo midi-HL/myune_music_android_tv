@@ -39,6 +39,7 @@ import 'layout/navigation_notifier.dart';
 import 'services/license_service.dart';
 import 'tv/tv_device.dart';
 import 'tv/tv_focus.dart';
+import 'tv/tv_focus_nav.dart';
 import 'tv/tv_input_scope.dart';
 import 'tv/tv_navigation.dart';
 import 'tv/tv_settings.dart';
@@ -558,8 +559,11 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
           locale: const Locale('zh', 'CH'),
 
           debugShowCheckedModeBanner: false,
-          title: 'MyuneMusic',
+          title: '星音 StarNote',
           navigatorKey: tvRootNavigatorKey,
+          navigatorObservers: const <NavigatorObserver>[
+            TvFocusNavigatorObserver(),
+          ],
           theme: TvDevice.isTv
               ? applyTvFocusTheme(themeProvider.lightThemeData)
               : themeProvider.lightThemeData,

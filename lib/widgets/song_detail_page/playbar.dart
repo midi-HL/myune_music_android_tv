@@ -8,6 +8,7 @@ import '../volume_control_state.dart';
 import '../balance_rate_control.dart';
 import '../play_pause_button.dart';
 import '../play_mode_button.dart';
+import '../../tv/tv_focus_nav.dart';
 
 // 格式化时间函数
 String _formatDuration(Duration duration) {
@@ -16,6 +17,25 @@ String _formatDuration(Duration duration) {
   final minutes = twoDigits(duration.inMinutes.remainder(60));
   final seconds = twoDigits(duration.inSeconds.remainder(60));
   return "$minutes:$seconds";
+}
+
+// 歌词显示设置入口。桌面端原本挂在窗口标题栏上，而 Android 上标题栏
+// 返回 SizedBox.shrink()，入口随窗口化一起消失；这里补回播放控制排，
+// 抽屉本身由 SongDetailPage 的 Scaffold.drawer 提供。
+Widget buildLyricsSettingsButton(
+  BuildContext context, {
+  required Color color,
+  required double size,
+}) {
+  return IconButton(
+    icon: Icon(Icons.text_format, color: color, size: size),
+    iconSize: size,
+    tooltip: '歌词显示设置',
+    onPressed: () {
+      Scaffold.of(context).openDrawer();
+      TvFocusController.instance.scheduleFocusInDrawer();
+    },
+  );
 }
 
 class Playbar extends StatefulWidget {
@@ -261,7 +281,15 @@ class _PlaybarState extends State<Playbar> {
                       onPressed: () {
                         // 打开右侧抽屉
                         Scaffold.of(context).openEndDrawer();
+                        TvFocusController.instance
+                            .scheduleFocusInDrawer();
                       },
+                    ),
+                    // 歌词显示设置（原窗口标题栏入口在 Android 上被移除）
+                    buildLyricsSettingsButton(
+                      context,
+                      color: onBarColor.withValues(alpha: 0.7),
+                      size: 23 * scale,
                     ),
                   ],
                 ),
@@ -476,6 +504,13 @@ class _PortraitPlaybarState extends State<PortraitPlaybar> {
                       size: 28 * scale,
                     ),
                     onPressed: () => playlistNotifier.playNext(),
+                  ),
+                  SizedBox(width: 16 * scale),
+                  // 歌词显示设置（竖屏分支同样补齐入口）
+                  buildLyricsSettingsButton(
+                    context,
+                    color: onBarColor,
+                    size: 23 * scale,
                   ),
                 ],
               ),
