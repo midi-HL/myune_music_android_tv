@@ -421,3 +421,70 @@ Flutter 在 Android 上确实把方向键绑定 `DirectionalFocusIntent`、`sele
 - 静态复核 62/62 通过：括号平衡、关键行为断言、已删除项残留、import 覆盖、进度条 / 音量条 / 动态背景 / 过扫描等回归项。
 - 本机按用户要求**不再控制真机电视**；曾尝试安装 Android TV 模拟器，已装好 SDK 命令行工具、emulator、Android TV 系统镜像并创建 AVD，但本机 Windows Hypervisor Platform / AEHD 未启用且会话非管理员，x86_64 镜像无法启动、ARM64 镜像被 QEMU 拒绝，用户随后明确要求放弃模拟器安装。**因此本轮没有真机 / 模拟器 UI 实测**，需用户在真机回归。
 - 提交：见 `git log` 中 `android/tv: round-4` 开头的提交；回滚用 `git revert <该提交>`，或 checkout `tv-v3-focus-fix` / `baseline-4168e51-pre-tv`。
+
+---
+
+## 17. 开源化、应用信息与三 ABI（2026-11-08 夜）
+
+用户明确：TV 版仍有不少 bug，但**本轮不修 bug**，只做「设置 → 常规 → 应用信息与说明 → 关于信息」
+的指向改造、开一个开源项目、检查更新改指向 TV 版、以及多编译 x86 架构。项目说明需中英双版。
+
+### 17.1 用户确认的四项决策
+
+| 决策 | 结论 |
+| --- | --- |
+| 开源仓库落地 | 现有 `midi-HL/myune_music_android_tv` 由 private **转为 public**，保留完整历史、tag 与 CI |
+| 开源协议 | **Apache-2.0**（与上游一致），GPL/LGPL 义务在 README / NOTICE / THIRD_PARTY_NOTICES 中如实声明 |
+| 开发者署名 | **辰星 \| Edwin 3J \| HLmidi**（GitHub `midi-HL`，Telegram `https://t.me/Edwin_hlcx`），并单独注明上游原作者 `xiaobaimc` |
+| x86 32 位 | 用户确认「好像这个架构的确也不行」→ **不产出 x86（32 位）APK**，只新增 x86_64（AMD64） |
+
+### 17.2 应用信息统一指向 TV 改版仓库
+
+新增 `lib/tv/tv_app_info.dart`，集中维护项目名、TV 版本号、本仓库 / 上游仓库 URL、Issue、
+Releases、协议与开发者署名，避免两处链接分叉。
+
+- `lib/page/setting/about.dart`：「关于信息」由 `showAboutDialog` 改为展示
+  `星音 StarNote（TV 改版）` / `v1.0.0` / 开发者 / Telegram / Apache-2.0 / 本改版仓库 /
+  上游仓库 / Issue / 电视操作 / 与上游关系 / GPL 声明。所有 URL 明文写出，TV 上即使无法点击
+  也能读到。不再显示 PC 原版「Myune Music / xiaobaimc/myune_music」为主体的信息。
+- `lib/page/setting/update_checker.dart`：`_apiUrl` 改为 `TvAppInfo.releasesApiUrl`
+  （`midi-HL/myune_music_android_tv`），删除上游 `xiaobaimc/myune_music` 常量；新增
+  `_normalizeVersion()` 从 tag 提取点分版本，兼容 `vX.Y.Z` 与带前缀 tag。
+- `lib/page/setting/tabs/general_tab.dart`：检查更新与「当前版本」改用
+  `TvAppInfo.version`（`v1.0.0`），并注明基于上游 `0.9.5`；仍 import `setting_page.dart`
+  使用 `appVersion`。
+- `lib/main.dart`：启动静默检查 `currentVersion` 改用 `TvAppInfo.version`；原
+  `page/setting/setting_page.dart` import 替换为 `tv/tv_app_info.dart`（main.dart 只用它取版本号）。
+
+版本号分离：上游 `appVersion = 0.9.5` 保留作为「基于上游」的说明；TV 改版独立版本
+`TvAppInfo.version = 1.0.0`，与首发 Release tag `v1.0.0` 对应，安装首发版后检查更新
+会正确返回「当前已是最新版本」。
+
+### 17.3 开源项目文档
+
+- 上游原 README 原样归档为 `UPSTREAM_README.md`（Apache-2.0 保留上游说明）。
+- `README.md`（简体中文）与 `README.en.md`（English）互链，均写清：基于哪个源仓库、
+  电视 / 遥控器 / 键盘 / 手柄操作、做了哪些适配、开发者是谁、Apache-2.0 协议、
+  与上游功能基本一致的说明、三 ABI 与不产出 x86 32 位的原因、检查更新指向、构建方式、
+  GPL/LGPL 合规声明、反馈与回滚。
+- 新增 `NOTICE` 标注本改版对上游的修改；重写 `THIRD_PARTY_NOTICES.md` 说明公开发行状态、
+  libmpv/FFmpeg 的 GPL 义务与 x86 32 位缺库原因。
+- `LICENSE` 沿用上游 Apache-2.0 全文，未改动。
+
+### 17.4 CI 三 ABI
+
+`.github/workflows/build_android.yml` matrix 由 2 个扩到 3 个：
+`arm64-v8a / android-arm64`、`armeabi-v7a / android-arm`、**`x86_64 / android-x64`**；
+Rust targets 增加 `x86_64-linux-android`。`mpv_audio_kit` 的 `abiFilters` 已含
+`x86_64` 且 `libmpv-r13` 有 `libmpv_android-x86_64.so`，cargokit 的 `target.dart` 也支持
+`x86_64-linux-android / android-x64 / x86_64`，因此该 ABI 可正常播放。
+
+**不产出 x86 32 位**：`libmpv-r13` 只发布 arm64 / armv7 / x86_64 三种预编译库，
+`abiFilters` 不含 x86；强行构建出的包缺 `libmpv.so`，安装后无法出声。已按用户确认的
+结论放弃，并在 README 与 THIRD_PARTY_NOTICES 中写明原因，不交付明知不可用的包。
+
+### 17.5 回滚
+
+本轮为 `518a37f` 之后的新提交，tag `v1.0.0`。回滚：`git revert <本轮提交>`，
+或 checkout `tv-v4-focus-fix` / `baseline-4168e51-pre-tv`。仓库转 public 与 Release
+创建属远端状态变更，需单独撤销（把 visibility 改回 private、删除 Release/tag）。

@@ -30,7 +30,7 @@ import 'page/playlist/playlist_content_notifier.dart';
 import 'services/notification_service.dart';
 import 'services/update_check_service.dart';
 import 'page/setting/settings_provider.dart';
-import 'page/setting/setting_page.dart';
+import 'tv/tv_app_info.dart';
 import 'src/rust/frb_generated.dart';
 import 'package:flutter_single_instance/flutter_single_instance.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
@@ -296,7 +296,7 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
       if (!mounted || !settings.autoCheckUpdates) return;
 
       await UpdateCheckService.runSilentCheck(
-        currentVersion: appVersion,
+        currentVersion: TvAppInfo.version,
         notificationService: context.read<NotificationService>(),
       );
     } catch (e) {

@@ -15,8 +15,10 @@ env:
   ANDROID_BUILD_TOOLS: "36.0.0"
   ANDROID_NDK_VERSION: "28.2.13676358"
   ANDROID_CMAKE_VERSION: "3.22.1"
-  # 分别构建 64 位与 32 位单 ABI APK；每轮只编译一个 target-platform，
-  # 避免 Rust/cargokit 与 libmpv 下载任务在多 ABI 下互相覆盖产物。
+  # 分别构建单 ABI APK（arm64-v8a / armeabi-v7a / x86_64）；每轮只编译一个
+  # target-platform，避免 Rust/cargokit 与 libmpv 下载任务在多 ABI 下互相覆盖产物。
+  # 上游 libmpv-r13 只提供 arm64 / armv7 / x86_64 三种预编译库，没有 x86 32 位，
+  # 因此不产出 x86（32 位）APK；详见 README.md 与 THIRD_PARTY_NOTICES.md。
   # 正式签名所需的 4 个 secrets；未配置时保持 Flutter 模板的 debug 签名。
   SIGNING_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
   SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
@@ -36,6 +38,9 @@ jobs:
           - abi: armeabi-v7a
             target: android-arm
             artifact: myune-music-android-armv7
+          - abi: x86_64
+            target: android-x64
+            artifact: myune-music-android-x64
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -56,7 +61,7 @@ jobs:
       - name: Setup Rust (Android targets)
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
       # ubuntu-latest 已预装 Android SDK 与 cmdline-tools。
       # 不用 setup-android@v3：它默认仍安装已废弃的 "tools" 包，会直接报错退出。

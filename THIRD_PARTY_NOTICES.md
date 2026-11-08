@@ -1,18 +1,24 @@
 # Third-party notices / 第三方声明
 
-本文件记录 Android 移植版运行时携带或构建时下载的主要第三方组件。公开发布 APK 前，需按 `ANDROID_PORT_README.md` 的清单补齐完整许可证文本与源码获取方式。
+本文件记录**星音 StarNote（Myune Music Android TV 改版）**运行时携带或构建时下载的主要
+第三方组件。本仓库已按 Apache-2.0 公开发行源码；**分发编译后的 APK 之前**，仍须按下述
+清单履行许可证文本、版权声明与源码提供义务。
 
 ## 上游 MyuneMusic
 
-- 来源：`https://github.com/xiaobaimc/myune_music`
+- 来源：`https://github.com/xiaobaimc/myune_music`，基线版本 `0.9.5`
 - 许可证：Apache License 2.0，全文见 `LICENSE`
-- 本仓库改动：Android 平台隔离、移除桌面标题栏、隐藏桌面快捷键设置、cargokit/Flutter Gradle 兼容、Android CI runner 生成与签名配置。改动说明见 `ANDROID_PORT_README.md`。
+- 版权：Copyright 2025 xiaobaimc
+- 本仓库改动：Android 平台隔离、SAF/content:// 访问、Android TV Leanback 入口与品牌、
+  遥控器 / 键盘 / 手柄输入与焦点导航、应用信息与检查更新指向本改版仓库、三 ABI CI。
+  改动标注见 `NOTICE`，逐轮记录见 `ANDROID_PORT_HANDOFF.md` / `ANDROID_PORT_README.md`，
+  上游原文说明见 `UPSTREAM_README.md`。
 
 ## MiSans 字体
 
 - 文件：`assets/fonts/MiSansVF.ttf`
 - 权利方：小米公司；免费商用，版权不转移
-- 许可链接：上游 `README.md` 的「字体版权说明」章节
+- 许可链接：见 `UPSTREAM_README.md` 的「字体版权说明」章节
 
 ## mpv_audio_kit（Flutter 插件封装）
 
@@ -23,11 +29,21 @@
 
 ## libmpv / mpv / FFmpeg（预编译原生库）
 
-- 构建时由 `mpv_audio_kit/android/build.gradle.kts` 从 release `libmpv-r13` 下载 `libmpv.so`，按 ABI 放入 APK。
+- 构建时由 `mpv_audio_kit/android/build.gradle.kts` 从 release `libmpv-r13` 下载
+  `libmpv.so`，按 ABI 放入 APK。
 - mpv 项目：`https://github.com/mpv-player/mpv`；FFmpeg：`https://github.com/FFmpeg/FFmpeg`
-- 许可状态：mpv 主体为 GPL v2+（部分构建配置可能为 LGPL v2.1+）；FFmpeg 的实际许可证取决于启用的编解码器与构建参数，可能包含 GPL 组件。
-- 分发前必须核实 `libmpv-r13` 所含全部原生依赖、编译参数与对应源码，并在发行物中履行 GPL/LGPL 的许可证文本、版权声明、源码提供或书面要约义务。
+- 许可状态：mpv 主体为 GPL v2+（部分构建配置可能为 LGPL v2.1+）；FFmpeg 的实际许可证
+  取决于启用的编解码器与构建参数，可能包含 GPL 组件。
+- **ABI 限制**：`libmpv-r13` 只发布 `arm64-v8a` / `armeabi-v7a` / `x86_64` 三种预编译库，
+  `mpv_audio_kit` 的 `abiFilters` 同样不含 `x86`。本改版因此**不产出 x86（32 位）APK**：
+  该架构的包会缺少播放用的原生库，安装后无法出声。
+- 分发前必须核实 `libmpv-r13` 所含全部原生依赖、编译参数与对应源码，并在发行物中履行
+  GPL/LGPL 的许可证文本、版权声明、源码提供或书面要约义务。若 FFmpeg 启用了 GPL
+  编解码器，按 GPL 而非 LGPL 处理整个分发链路。
 
 ## 其他 Dart / Flutter 依赖
 
-`pubspec.yaml` 与 `pubspec.lock` 记录了完整依赖树，包括 `provider`、`shared_preferences`、`path_provider`、`file_picker`、`http`、`window_manager`、`hotkey_manager`、`flutter_rust_bridge` 等。每个包的许可证以各自 pub.dev / Git 仓库声明为准；公开发布时可基于 `flutter pub deps` 和 `pubspec.lock` 生成完整 SBOM。
+`pubspec.yaml` 与 `pubspec.lock` 记录了完整依赖树，包括 `provider`、`shared_preferences`、
+`path_provider`、`file_picker`、`http`、`window_manager`、`hotkey_manager`、
+`flutter_rust_bridge`、`mesh_gradient` 等。每个包的许可证以各自 pub.dev / Git 仓库声明为准；
+对外分发时可基于 `flutter pub deps` 和 `pubspec.lock` 生成完整 SBOM。

@@ -1,0 +1,38 @@
+星音 StarNote / StarNote (Myune Music Android TV Edition)
+Copyright 2026 辰星 | Edwin 3J | HLmidi (https://github.com/midi-HL)
+
+本产品包含由 xiaobaimc 开发的软件：
+  Myune Music — https://github.com/xiaobaimc/myune_music
+  Copyright 2025 xiaobaimc
+  以 Apache License, Version 2.0 授权。
+
+This product includes software developed by xiaobaimc:
+  Myune Music — https://github.com/xiaobaimc/myune_music
+  Copyright 2025 xiaobaimc
+  Licensed under the Apache License, Version 2.0.
+
+--------------------------------------------------------------------------------
+对本上游作品的修改（Android / Android TV 移植改版），由
+辰星 | Edwin 3J | HLmidi 完成：
+
+- Android 平台隔离：桌面专用插件仅在桌面初始化，去窗口标题栏、沉浸式全屏、
+  应用内缩放、横屏双栏、隐藏桌面快捷键设置。
+- SAF / content:// 音乐库：原生 MainActivity 目录树授权、递归音频枚举、字节读取，
+  Dart 侧适配播放与元数据解析。
+- Android TV 支持：LEANBACK_LAUNCHER、TV banner、品牌图标、同一 APK 自动识别 TV。
+- 输入与焦点：遥控器 / 键盘 / 手柄输入层、几何方向焦点导航、原生式焦点高亮、
+  进度条 / 设置滑块 / 音量条 / 抽屉返回键的 TV 可达性适配。
+- 应用信息：关于页与检查更新指向本改版仓库；TvAppInfo 统一维护项目元信息。
+- CI：GitHub Actions 生成 Android runner 并构建 arm64-v8a / armeabi-v7a / x86_64
+  三个单 ABI release APK。
+
+Modifications to the upstream work (Android / Android TV port) by
+辰星 | Edwin 3J | HLmidi include: Android platform isolation, SAF/content:// library
+access, Android TV Leanback launcher and branding, remote/keyboard/gamepad input with
+geometric focus navigation, TV control reachability, app info / update checks pointing
+at this repository, and a three-ABI GitHub Actions build.
+
+逐轮完整改动记录见 ANDROID_PORT_HANDOFF.md 与 ANDROID_PORT_README.md；
+上游原文说明见 UPSTREAM_README.md。
+Full change records: ANDROID_PORT_HANDOFF.md, ANDROID_PORT_README.md.
+Original upstream README: UPSTREAM_README.md.

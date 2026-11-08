@@ -7,6 +7,7 @@ import 'package:markdown_widget/markdown_widget.dart';
 import '../../../services/notification_service.dart';
 import '../../playlist/playlist_content_notifier.dart';
 
+import '../../../tv/tv_app_info.dart';
 import '../../../tv/tv_device.dart';
 import '../../../tv/tv_focus_nav.dart';
 import '../theme_selection_screen.dart';
@@ -38,8 +39,8 @@ class _GeneralTabState extends State<GeneralTab> {
     try {
       context.read<NotificationService>().info('正在检查更新...');
 
-      // 使用写好的版本号
-      final result = await UpdateChecker.checkForUpdates(appVersion);
+      // 检查更新针对本 TV 改版仓库的 Releases，不使用上游桌面版版本号。
+      final result = await UpdateChecker.checkForUpdates(TvAppInfo.version);
 
       if (!mounted) return;
 
@@ -180,7 +181,7 @@ class _GeneralTabState extends State<GeneralTab> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                '当前版本: $appVersion',
+                '当前版本: v${TvAppInfo.version}（TV 版，基于上游 $appVersion）',
                 style: Theme.of(context).textTheme.titleMedium,
               ),
               ElevatedButton.icon(

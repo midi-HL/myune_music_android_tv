@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+import '../../tv/tv_app_info.dart';
+
 // 定义更新检查结果类型
 enum UpdateCheckResultType {
   successUpdateAvailable, // 有可用更新
@@ -29,10 +31,16 @@ class UpdateCheckResult {
 }
 
 class UpdateChecker {
-  static const String _repoOwner = 'xiaobaimc';
-  static const String _repoName = 'myune_music';
-  static const String _apiUrl =
-      'https://api.github.com/repos/$_repoOwner/$_repoName/releases/latest';
+  /// 检查更新只看**本 TV 改版开源仓库**的 Releases，不看上游 PC 桌面版。
+  /// 地址与「关于信息」共用 [TvAppInfo]，避免两处链接分叉。
+  static const String _apiUrl = TvAppInfo.releasesApiUrl;
+
+  /// 从 Release tag 中提取可比较的点分版本号。
+  /// 约定本仓库 tag 为 `vX.Y.Z`；兼容 `tv-1.0.1` 之类的前缀。
+  static String _normalizeVersion(String tag) {
+    final match = RegExp(r'\d+(?:\.\d+)+').firstMatch(tag);
+    return match?.group(0) ?? tag.trim();
+  }
 
   // 检查是否有新版本
   static Future<UpdateCheckResult> checkForUpdates(
@@ -44,7 +52,7 @@ class UpdateChecker {
           .timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        final latestVersion = data['tag_name'].toString().replaceAll('v', '');
+        final latestVersion = _normalizeVersion(data['tag_name'].toString());
         final releaseNotes = data['body'] as String? ?? '';
         final htmlUrl = data['html_url'] as String? ?? '';
 
