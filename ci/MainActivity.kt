@@ -1,27 +1,37 @@
 package com.midihl.myune_music_android
 
 import android.app.Activity
+import android.app.UiModeManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.database.Cursor
 import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
+import android.view.InputDevice
+import android.view.KeyEvent
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
+import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 import java.io.ByteArrayOutputStream
 import java.util.LinkedList
 
 class MainActivity : FlutterActivity() {
-    private val channel = "myune_music_android/saf"
+    private val safChannel = "myune_music_android/saf"
+    private val deviceChannel = "myune_music_android/device"
+    private val inputEventChannel = "myune_music_android/input_events"
     private val requestOpenTree = 4201
     private var pendingTreeResult: MethodChannel.Result? = null
+    private var inputSink: EventChannel.EventSink? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channel).setMethodCallHandler { call, result ->
+        val messenger = flutterEngine.dartExecutor.binaryMessenger
+
+        MethodChannel(messenger, safChannel).setMethodCallHandler { call, result ->
             when (call.method) {
                 "pickDirectoryTree" -> pickDirectoryTree(result)
                 "listAudioFiles" -> {
@@ -52,6 +62,68 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        // Android TV 判定与输入设备信息。桌面端不会加载这个 Activity。
+        MethodChannel(messenger, deviceChannel).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "getDeviceInfo" -> result.success(deviceInfo())
+                else -> result.notImplemented()
+            }
+        }
+
+        // 按键事件只做「广播」，不吞事件：方向键 / DPAD_CENTER / 字符输入仍由
+        // Flutter 的焦点系统与文本输入链路处理，避免 TV 上出现双跳或无法打字。
+        EventChannel(messenger, inputEventChannel).setStreamHandler(
+            object : EventChannel.StreamHandler {
+                override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
+                    inputSink = events
+                }
+
+                override fun onCancel(arguments: Any?) {
+                    inputSink = null
+                }
+            },
+        )
+    }
+
+    private fun deviceInfo(): Map<String, Any> {
+        val pm = packageManager
+        val leanback = pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK)
+        val television = pm.hasSystemFeature("android.hardware.type.television")
+        val touchscreen = pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+        val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
+        val tvMode = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        return mapOf(
+            "isTv" to (leanback || television || tvMode),
+            "hasLeanback" to leanback,
+            "hasTelevisionFeature" to television,
+            "hasTouchscreen" to touchscreen,
+            "uiModeTypeTelevision" to tvMode,
+            "sdkInt" to Build.VERSION.SDK_INT,
+        )
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            val sink = inputSink
+            if (sink != null) {
+                val device = event.device
+                sink.success(
+                    mapOf(
+                        "keyCode" to event.keyCode,
+                        "repeat" to event.repeatCount,
+                        "metaState" to event.metaState,
+                        "source" to event.source,
+                        "deviceId" to event.deviceId,
+                        "deviceName" to (device?.name ?: ""),
+                        "deviceDescriptor" to (device?.descriptor ?: ""),
+                        "isGamepad" to event.isFromSource(InputDevice.SOURCE_GAMEPAD),
+                        "isKeyboard" to event.isFromSource(InputDevice.SOURCE_KEYBOARD),
+                    ),
+                )
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun pickDirectoryTree(result: MethodChannel.Result) {

@@ -37,6 +37,11 @@ import 'package:hotkey_manager/hotkey_manager.dart';
 import 'page/statistics_page/statistics_manager.dart';
 import 'layout/navigation_notifier.dart';
 import 'services/license_service.dart';
+import 'tv/tv_device.dart';
+import 'tv/tv_focus.dart';
+import 'tv/tv_input_scope.dart';
+import 'tv/tv_navigation.dart';
+import 'tv/tv_settings.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,8 +49,12 @@ void main() async {
   AppLicenses.register();
 
   if (Platform.isAndroid) {
-    // 隐藏系统状态栏与手势导航条；横屏媒体应用由手势从边缘唤出系统栏。
-    await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    // 先判定设备类型：TV 分支不启用沉浸式，也不使用手机端的应用内缩放。
+    await TvDevice.initialize();
+    if (!TvDevice.isTv) {
+      // 隐藏系统状态栏与手势导航条；横屏媒体应用由手势从边缘唤出系统栏。
+      await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    }
     await SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
       DeviceOrientation.landscapeRight,
@@ -169,6 +178,7 @@ void main() async {
           create: (context) => StatisticsManager(),
         ),
         ChangeNotifierProvider(create: (_) => NavigationNotifier()),
+        ChangeNotifierProvider(create: (_) => TvSettings()),
       ],
       child: const MyApp(),
     ),
@@ -270,7 +280,9 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (Platform.isAndroid && state == AppLifecycleState.resumed) {
+    if (Platform.isAndroid &&
+        !TvDevice.isTv &&
+        state == AppLifecycleState.resumed) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
     }
   }
@@ -547,11 +559,30 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
 
           debugShowCheckedModeBanner: false,
           title: 'MyuneMusic',
-          theme: themeProvider.lightThemeData,
-          darkTheme: themeProvider.darkThemeData,
+          navigatorKey: tvRootNavigatorKey,
+          theme: TvDevice.isTv
+              ? applyTvFocusTheme(themeProvider.lightThemeData)
+              : themeProvider.lightThemeData,
+          darkTheme: TvDevice.isTv
+              ? applyTvFocusTheme(themeProvider.darkThemeData)
+              : themeProvider.darkThemeData,
           themeMode: themeProvider.themeMode,
           builder: (context, materialAppChild) {
-            // Android 上去掉窗口拖拽缩放与全局快捷键，并做应用内整体缩放。
+            // Android TV：不做手机端的 0.72 缩放，改用 10-foot 安全区 +
+            // TV 专用缩放，并挂上统一输入层与焦点遍历策略。
+            if (Platform.isAndroid && TvDevice.isTv) {
+              final tv = context.watch<TvSettings>();
+              return TvInputScope(
+                child: TvSafeArea(
+                  overscan: tv.overscan,
+                  child: TvUiScaler(
+                    scale: tv.uiScale,
+                    child: materialAppChild!,
+                  ),
+                ),
+              );
+            }
+            // Android（手机）上去掉窗口拖拽缩放与全局快捷键，并做应用内整体缩放。
             if (Platform.isAndroid) {
               final uiScale = context
                   .watch<SettingsProvider>()

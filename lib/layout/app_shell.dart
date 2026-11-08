@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../tv/tv_device.dart';
+import '../tv/tv_navigation.dart';
 import '../widgets/app_window_title_bar.dart';
 import '../widgets/custom_background_layer.dart';
 import 'main_view.dart';
@@ -12,7 +14,8 @@ class AppShell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(
+    final scaffold = Scaffold(
+      key: tvScaffoldKey,
       backgroundColor: Colors.transparent,
       endDrawer: PlayingQueueDrawer(),
       body: Stack(
@@ -35,6 +38,17 @@ class AppShell extends StatelessWidget {
           ToastOverlay(),
         ],
       ),
+    );
+
+    // TV 上统一接管系统返回键：先逐级关闭抽屉 / 对话框 / 播放页，
+    // 主界面再返回电视桌面。手机端行为完全不变。
+    if (!TvDevice.isTv) return scaffold;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (bool didPop, Object? result) {
+        if (!didPop) TvBackHandler.handle();
+      },
+      child: scaffold,
     );
   }
 }

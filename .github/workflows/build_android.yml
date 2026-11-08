@@ -149,25 +149,134 @@ jobs:
           PY
 
       # mpv_audio_kit 的 Manifest 已带 FOREGROUND_SERVICE / POST_NOTIFICATIONS，
-      # 这里只补歌词抓取等网络功能需要的 INTERNET。
-      - name: Patch AndroidManifest permissions
+      # 这里补 INTERNET，并注入 Android TV 桌面入口（LEANBACK_LAUNCHER、
+      # uses-feature 与 320x180 banner）。同一 APK 同时支持手机与电视。
+      - name: Patch AndroidManifest permissions and TV launcher
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          import struct
+          import zlib
 
           manifest = Path("android/app/src/main/AndroidManifest.xml")
           text = manifest.read_text(encoding="utf-8")
-          if "android.permission.INTERNET" not in text:
-              start = text.find("<manifest")
-              end = text.find(">", start)
+
+          def manifest_open_end(source):
+              start = source.find("<manifest")
+              end = source.find(">", start)
               if start < 0 or end < 0:
                   raise SystemExit("cannot locate <manifest ...> opening tag")
+              return end
+
+          if "android.permission.INTERNET" not in text:
+              end = manifest_open_end(text)
               permission = '\n    <uses-permission android:name="android.permission.INTERNET"/>'
               text = text[: end + 1] + permission + text[end + 1 :]
-              manifest.write_text(text, encoding="utf-8")
               print("injected android.permission.INTERNET")
           else:
               print("android.permission.INTERNET already present")
+
+          # 触摸屏 / leanback / gamepad 都声明为可选，保证同一 APK 在
+          # 手机与 Android TV 上都能安装。
+          features = (
+              "android.software.leanback",
+              "android.hardware.touchscreen",
+              "android.hardware.gamepad",
+          )
+          missing = [f for f in features if 'android:name="%s"' % f not in text]
+          if missing:
+              end = manifest_open_end(text)
+              block = "".join(
+                  '\n    <uses-feature android:name="%s" android:required="false"/>' % f
+                  for f in missing
+              )
+              text = text[: end + 1] + block + text[end + 1 :]
+              print("injected uses-feature: %s" % ", ".join(missing))
+
+          if "android.intent.category.LEANBACK_LAUNCHER" not in text:
+              leanback = (
+                  '\n                <category '
+                  'android:name="android.intent.category.LEANBACK_LAUNCHER"/>'
+              )
+              anchor = 'android.intent.category.LAUNCHER"'
+              idx = text.find(anchor)
+              tag_end = text.find("/>", idx) if idx >= 0 else -1
+              if tag_end >= 0:
+                  text = text[: tag_end + 2] + leanback + text[tag_end + 2 :]
+              else:
+                  # 模板若没有 LAUNCHER category，退回到第一个 intent-filter 内。
+                  filter_end = text.find("</intent-filter>")
+                  if filter_end < 0:
+                      raise SystemExit("cannot locate intent-filter for TV launcher")
+                  text = text[:filter_end] + leanback + "\n            " + text[filter_end:]
+              print("injected LEANBACK_LAUNCHER category")
+
+          if "android:banner=" not in text:
+              app_start = text.find("<application")
+              if app_start < 0:
+                  raise SystemExit("cannot locate <application> tag")
+              app_end = text.find(">", app_start)
+              if app_end < 0:
+                  raise SystemExit("cannot locate end of <application> tag")
+              text = (
+                  text[:app_end]
+                  + '\n        android:banner="@drawable/tv_banner"'
+                  + text[app_end:]
+              )
+              print("injected android:banner")
+
+          manifest.write_text(text, encoding="utf-8")
+
+          final = manifest.read_text(encoding="utf-8")
+          for token in (
+              "android.permission.INTERNET",
+              "android.software.leanback",
+              "android.hardware.touchscreen",
+              "android.intent.category.LEANBACK_LAUNCHER",
+              "android:banner=",
+          ):
+              if token not in final:
+                  raise SystemExit("TV manifest patch incomplete: missing " + token)
+
+          # 320x180 xhdpi TV banner：仅用标准库生成 PNG，不引入图片工具。
+          W, H = 320, 180
+          rows = []
+          for y in range(H):
+              row = bytearray(b"\x00")
+              for x in range(W):
+                  t = x / (W - 1)
+                  r = int(18 + 30 * t)
+                  g = int(24 + 46 * t)
+                  b = int(38 + 72 * t)
+                  dx = x - W / 2
+                  dy = y - H / 2
+                  d = (dx * dx + dy * dy) ** 0.5
+                  if 42 <= d <= 48:
+                      r, g, b = 235, 240, 250
+                  if -14 <= dx <= 16 and abs(dy) <= 14 and dx <= 16 - abs(dy):
+                      r, g, b = 235, 240, 250
+                  row += bytes((r, g, b))
+              rows.append(bytes(row))
+
+          def chunk(tag, data):
+              return (
+                  struct.pack(">I", len(data))
+                  + tag
+                  + data
+                  + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+              )
+
+          png = (
+              b"\x89PNG\r\n\x1a\n"
+              + chunk(b"IHDR", struct.pack(">IIBBBBB", W, H, 8, 2, 0, 0, 0))
+              + chunk(b"IDAT", zlib.compress(b"".join(rows), 9))
+              + chunk(b"IEND", b"")
+          )
+          banner_dir = Path("android/app/src/main/res/drawable-xhdpi")
+          banner_dir.mkdir(parents=True, exist_ok=True)
+          banner_path = banner_dir / "tv_banner.png"
+          banner_path.write_bytes(png)
+          print("generated %s (%d bytes)" % (banner_path, len(png)))
           PY
 
       # 可选正式签名：4 个 secrets 齐全时切换 release signingConfig；

@@ -7,6 +7,7 @@ import 'package:markdown_widget/markdown_widget.dart';
 import '../../../services/notification_service.dart';
 import '../../playlist/playlist_content_notifier.dart';
 
+import '../../../tv/tv_device.dart';
 import '../theme_selection_screen.dart';
 import '../../../theme/theme_provider.dart';
 import '../settings_provider.dart';
@@ -134,7 +135,9 @@ class _GeneralTabState extends State<GeneralTab> {
       children: [
         // 主题配色选择
         const ThemeSelectionScreen(),
-        if (Platform.isAndroid)
+        // TV 使用独立的 10-foot 缩放设置（设置 → 电视与输入），
+        // 手机端继续保留原来的 0.55~1.0 应用内缩放。
+        if (Platform.isAndroid && !TvDevice.isTv)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Column(

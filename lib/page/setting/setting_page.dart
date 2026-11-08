@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
+import '../../tv/tv_device.dart';
+import '../../tv/tv_settings_tab.dart';
 import 'tabs/general_tab.dart';
 import 'tabs/personalization_tab.dart';
 import 'tabs/playback_page_tab.dart';
@@ -76,6 +78,15 @@ class _SettingPageState extends State<SettingPage> {
                 isSelected: _selectedIndex == 5,
                 onTap: () => setState(() => _selectedIndex = 5),
               ),
+              // TV 专属设置：手柄图标、10-foot 画面、按键学习与键位速查。
+              if (TvDevice.isTv)
+                _SettingNavItem(
+                  index: 6,
+                  title: '电视与输入',
+                  icon: Icons.gamepad_outlined,
+                  isSelected: _selectedIndex == 6,
+                  onTap: () => setState(() => _selectedIndex = 6),
+                ),
             ],
           ),
         ),
@@ -114,6 +125,8 @@ class _SettingPageState extends State<SettingPage> {
                   return const HotkeysTab(key: ValueKey('hotkeys'));
                 case 5:
                   return const AdvancedTab(key: ValueKey('advanced'));
+                case 6:
+                  return const TvSettingsTab(key: ValueKey('tv_settings'));
                 default:
                   return const SizedBox.shrink();
               }

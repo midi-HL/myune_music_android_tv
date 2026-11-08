@@ -232,3 +232,68 @@ PY
 - 涉及 11 点问题时只按第 5 节结论记录，不主动扩展修复。
 - 若需要新的技术方向、签名策略、仓库公开、正式发布或功能范围调整，先向用户列选项并等用户拍板。
 - 编译继续走 GitHub Actions；本机只做静态检查、日志核查、Artifact 下载与哈希校验。
+
+## 13. Android TV 适配（2026-11-08）
+
+### 13.1 仓库与回滚
+
+TV 工作改在**新仓库**进行，原仓库 `midi-HL/myune_music_android` 保持不动。
+
+- 新仓库：`https://github.com/midi-HL/myune_music_android_tv`（private，`main` 为默认分支）。
+- 本地新增 remote 别名为 `tv`；`origin` / `upstream` 未改动。
+- 推送时携带了 `main` 的**完整 310 个提交**，未做 squash / 改写历史。
+- 回滚锚点（tag 与提交一一对应）：
+
+  | Tag | 提交 | 含义 |
+  | --- | --- | --- |
+  | `baseline-558a71f-0713` | `558a71f` | 11-06 07:13 回档基线，沉浸式 + 缩放 + SAF 首个可用版 |
+  | `baseline-4168e51-pre-tv` | `4168e51` | TV 适配开始前的完整状态（双 ABI workflow + 交接文档） |
+
+  回滚方式：`git checkout baseline-4168e51-pre-tv`（或在该 tag 上新建分支），
+  也可用 `git revert <TV 提交>` 保留审计轨迹。两个 tag 均已推送到新仓库远端。
+
+### 13.2 范围与文件
+
+新增 `lib/tv/`：`tv_actions.dart`（逻辑动作）、`tv_key_map.dart`（Android 键值归一化）、
+`tv_device.dart`（TV 判定）、`tv_settings.dart`（持久化）、`tv_gamepad_icons.dart`、
+`tv_navigation.dart`（返回与抽屉）、`tv_focus.dart`（安全区 / 缩放 / 焦点 / 主题）、
+`tv_input_scope.dart`（输入分发）、`tv_settings_tab.dart`（设置 UI）。
+
+改动：`ci/MainActivity.kt`（TV 判定 + 按键事件广播，不吞键）、`lib/main.dart`、
+`lib/layout/app_shell.dart`、`lib/page/setting/setting_page.dart`、
+`lib/page/setting/tabs/general_tab.dart`、`.github/workflows/build_android.yml`。
+
+同一 APK 自动识别 TV：设备非 TV 时所有新增代码路径均不生效，手机端的
+0.72 缩放、横屏锁定、沉浸式、SAF 行为保持原样。SAF 目录树授权按用户要求保留不动。
+
+### 13.3 输入设计
+
+- 方向键 / OK / 回车 / 空格 / 字符输入**放行给 Flutter**，由焦点系统与文本输入处理；
+  输入层不重复驱动，避免一次按键跳两格。Space 与 Enter 因此是「激活」而不是播放/暂停。
+- 播放控制走媒体键、键盘功能键与手柄肩键；未带媒体键的遥控器通过
+  方向键 + OK 的焦点控件完成全部操作，媒体键只是加速键。
+- Xbox 与 PlayStation 手柄在 Android 上共用 `BUTTON_A/B/X/Y/L1/R1/L2/R2/START/SELECT`，
+  按**物理位置**统一映射；设置 → 电视与输入 → 手柄图标可切换显示
+  「自动识别 / Xbox / PlayStation」，仅影响图标，不影响功能。
+- 非标准键值：设置页「学习模式」记录按下的任意 keyCode，可逐项绑定到逻辑动作，
+  自定义映射优先于内置映射并持久化。厂商私有键值因此可被兼容，但**不承诺预置覆盖**。
+- 返回键：`PopScope` + 320ms 去重统一处理系统 BACK、手柄 B 与键盘 Esc，
+  先逐级关闭抽屉 / 对话框 / 播放页，主界面返回电视桌面。
+
+### 13.4 CI 与 TV 桌面入口
+
+在原有 Manifest 补丁步骤中幂等注入 `LEANBACK_LAUNCHER`、
+`android.software.leanback` / `android.hardware.touchscreen` / `android.hardware.gamepad`
+（均 `required="false"`，保证手机与电视都能装），并用标准库生成 320×180
+`drawable-xhdpi/tv_banner.png`。两个 ABI job 都产出带 TV 入口的 APK，不新增独立包。
+
+### 13.5 已知限制
+
+- 海外标准 Android TV 为目标设备；国内盒子的私有键值依赖「按键学习」自行绑定。
+- 媒体键若被 `mpv_audio_kit` 的 MediaSession 先行消费，`dispatchKeyEvent` 可能收不到；
+  播放页焦点控件仍可完整操作。
+- 拖拽排序（`ReorderableDragStartListener`）与右键菜单在纯遥控器下不可达，
+  可用 `PopupMenuButton` 等可聚焦控件替代路径。
+- 手柄 A / ✕ 若某些设备只上报 `KEYCODE_BUTTON_A` 而不上报 `DPAD_CENTER`，
+  需在学习模式里把它绑定到「确认」类动作；标准 Android TV 设备通常已规范化。
+- 本机无 Flutter / Dart / Kotlin 工具链，编译与 APK 校验全部交由 GitHub Actions。
