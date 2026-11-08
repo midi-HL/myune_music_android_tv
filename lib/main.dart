@@ -28,6 +28,7 @@ import 'theme/theme_provider.dart';
 import 'layout/app_shell.dart';
 import 'page/playlist/playlist_content_notifier.dart';
 import 'services/notification_service.dart';
+import 'services/network/network_media_service.dart';
 import 'services/update_check_service.dart';
 import 'page/setting/settings_provider.dart';
 import 'tv/tv_app_info.dart';
@@ -95,6 +96,10 @@ void main() async {
   MpvAudioKit.ensureInitialized();
 
   await RustLib.init();
+
+  // 网络媒体：加载 WebDAV/FTP 配置与 B 站登录态，并启动本机流代理。
+  // 代理只监听 127.0.0.1，失败不阻断本地音乐功能。
+  await NetworkMediaService.initialize();
 
   // 初始化系统托盘（仅桌面）
   if (!Platform.isAndroid) {

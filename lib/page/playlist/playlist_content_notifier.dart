@@ -29,6 +29,7 @@ import '../../services/search_service.dart';
 import '../../services/search_index_store.dart';
 import '../../services/notification_service.dart';
 import '../../services/android_content_resolver.dart';
+import '../../services/network/remote_media_registry.dart';
 import '../../utils/search_debouncer.dart';
 import '../../lyrics/lyrics_handler.dart';
 
@@ -951,6 +952,13 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   // 解析单个歌曲文件的元数据
   Future<Song> _parseSongMetadata(String filePath) async {
+    // 网络媒体（WebDAV / FTP / 哔哩哔哩）的 filePath 是本机流代理 URL，
+    // 不是本地文件。直接查注册表拿到浏览页构造好的标题 / 歌手 / 时长，
+    // 避免误走 File.exists() / readAudioInfo() 而显示「文件不存在」。
+    // 本地文件路径不受影响，仍走原来的完整元数据链路。
+    final registered = RemoteMediaRegistry.lookup(filePath);
+    if (registered != null) return registered;
+
     final cacheKey = _normalizePath(filePath);
     final cached = _songMetadataCache[cacheKey];
 
@@ -1069,6 +1077,9 @@ class PlaylistContentNotifier extends ChangeNotifier {
   Future<Song> _prepareSongForPlayback(String filePath) async {
     // 首先获取基础元数据
     final Song basicSong = await _parseSongMetadata(filePath);
+    // 网络流没有本地封面，也不该把 http:// 交给 Rust 读标签；直接返回浏览页
+    // 构造好的元数据，本地文件仍走下面的完整封面/标签链路。
+    if (RemoteMediaRegistry.isNetwork(filePath)) return basicSong;
     final cacheKey = _normalizePath(filePath);
 
     if (basicSong.albumArt != null) {
@@ -3549,11 +3560,13 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
         // 将歌曲加载到播放器中，但不自动播放
         try {
-          // content:// 由 mpv_audio_kit 的 fd 通道打开；本地路径仍检查文件存在。
+          // content:// 由 mpv_audio_kit 的 fd 通道打开；网络媒体走本机流代理；
+          // 其它本地路径仍检查文件存在。
           final isContentUri = AndroidContentResolver.isContentUri(
             songFilePath,
           );
           if (isContentUri ||
+              RemoteMediaRegistry.isNetwork(songFilePath) ||
               await File(
                 Uri.file(songFilePath).toFilePath(windows: Platform.isWindows),
               ).exists()) {

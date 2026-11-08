@@ -83,6 +83,8 @@ dependencies:
   mesh_gradient: ^1.3.8
   pointycastle: ^3.9.1
   crypto: ^3.0.6
+  # 电视端 B 站扫码登录用的二维码渲染（纯 Dart 绘制，无平台通道）。
+  qr_flutter: ^4.1.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

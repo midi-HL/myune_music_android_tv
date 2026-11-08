@@ -24,13 +24,23 @@ This product includes software developed by xiaobaimc:
   进度条 / 设置滑块 / 音量条 / 抽屉返回键的 TV 可达性适配。
 - 应用信息：关于页与检查更新指向本改版仓库；TvAppInfo 统一维护项目元信息。
 - CI：GitHub Actions 生成 Android runner 并构建 arm64-v8a / armeabi-v7a / x86_64
-  三个单 ABI release APK。
+  三个单 ABI release APK；固定 release 签名（缺失签名 secrets 或检出 Android Debug
+  证书直接失败），三个 ABI 共用同一证书，可覆盖安装。
+- 网络媒体：新增「网络媒体」入口；WebDAV（PROPFIND / Basic Auth / Range）与 FTP
+  （PASV / REST）客户端；哔哩哔哩搜索、分 P、WBI 签名、DASH 音频流 / 视频流、
+  二维码扫码登录；只监听 127.0.0.1 的本机 HTTP 流代理（200/206 + Content-Range）；
+  远端元数据注册表，使网络流不误走本地文件解析。按需拉流、不占用电视存储。
+- 电视端文本输入：字段按钮 → 单字段输入弹窗 → autofocus + 显式 TextInput.show，
+  保证软键盘可唤出；文本输入获焦时全局 TV 输入层不劫持任何按键。
+- 二维码登录：qr_flutter 渲染二维码，轮询扫码状态，仅在本机保存登录 Cookie。
 
 Modifications to the upstream work (Android / Android TV port) by
 辰星 | Edwin 3J | HLmidi include: Android platform isolation, SAF/content:// library
 access, Android TV Leanback launcher and branding, remote/keyboard/gamepad input with
 geometric focus navigation, TV control reachability, app info / update checks pointing
-at this repository, and a three-ABI GitHub Actions build.
+at this repository, a three-ABI GitHub Actions build with a fixed release signature,
+network media (WebDAV / FTP / Bilibili streaming, local loopback Range proxy, QR-code
+login, TV soft-keyboard input), and remote metadata registry.
 
 逐轮完整改动记录见 ANDROID_PORT_HANDOFF.md 与 ANDROID_PORT_README.md；
 上游原文说明见 UPSTREAM_README.md。

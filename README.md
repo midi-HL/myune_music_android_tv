@@ -23,13 +23,14 @@
 4. [开发者与维护者](#4-开发者与维护者)
 5. [电视 / 遥控器 / 键盘 / 手柄操作](#5-电视--遥控器--键盘--手柄操作)
 6. [做了哪些适配](#6-做了哪些适配)
-7. [下载与 ABI](#7-下载与-abi)
-8. [检查更新](#8-检查更新)
-9. [从源码构建](#9-从源码构建)
-10. [开源协议](#10-开源协议)
-11. [反馈与贡献](#11-反馈与贡献)
-12. [回滚](#12-回滚)
-13. [致谢](#13-致谢)
+7. [网络媒体（WebDAV / FTP / 哔哩哔哩）](#7-网络媒体webdav--ftp--哔哩哔哩)
+8. [下载与 ABI](#8-下载与-abi)
+9. [检查更新](#9-检查更新)
+10. [从源码构建](#10-从源码构建)
+11. [开源协议](#11-开源协议)
+12. [反馈与贡献](#12-反馈与贡献)
+13. [回滚](#13-回滚)
+14. [致谢](#14-致谢)
 
 ---
 
@@ -57,7 +58,7 @@ Android TV 启动器共用；TV 桌面另有 320×180 横幅。
 | 上游原文说明 | [UPSTREAM_README.md](UPSTREAM_README.md)（原样保留） |
 | **本改版开源仓库** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | 本改版协议 | **Apache License 2.0**（与上游一致） |
-| 本改版版本 | `1.0.0`（见 `lib/tv/tv_app_info.dart`） |
+| 本改版版本 | `1.1.0`（见 `lib/tv/tv_app_info.dart`） |
 
 本仓库**保留了上游完整提交历史**（未 squash、未改写），所有改版内容以新增提交与 tag 形式记录，
 可随时回滚。改动清单见 [NOTICE](NOTICE) 与 [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)。
@@ -76,9 +77,10 @@ Android TV 启动器共用；TV 桌面另有 320×180 横幅。
 - 其它：模糊 / 拼音 / 首拼搜索、本地播放统计、音频分析页
 - **桌面版 Windows / Linux 的构建与功能不受本改版影响**
 
-**本改版新增 / 差异仅在平台适配层与输入层**（详见第 6 节）：Android 平台隔离、SAF 文件访问、
-TV 桌面入口与品牌、遥控器 / 键盘 / 手柄输入、焦点导航、TV 控件可达性，以及指向本仓库的
-关于信息与检查更新。上游的功能逻辑没有被替换。
+**本改版的差异集中在平台适配层、输入层与新增的网络媒体入口**（详见第 6、7 节）：Android 平台隔离、
+SAF 文件访问、TV 桌面入口与品牌、遥控器 / 键盘 / 手柄输入、焦点导航、TV 控件可达性、
+指向本仓库的关于信息与检查更新、固定 release 签名，以及「网络媒体」页里新增的 WebDAV / FTP /
+哔哩哔哩流式播放。上游已有的本地音乐播放逻辑没有被替换，老功能不受影响。
 
 ## 4. 开发者与维护者
 
@@ -110,6 +112,24 @@ TV 桌面入口与品牌、遥控器 / 键盘 / 手柄输入、焦点导航、TV
 | 进度条 | 不参与方向键焦点链（避免 Slider 吞掉四向键），可用鼠标 / 触控拖动，或用媒体键 / 手柄扳机快进快退 |
 | 音效 / 均衡器滑块 | 横向滑块 ←/→ 调值、↑/↓ 离开；竖向频段滑块 ↑/↓ 调值、←/→ 离开 |
 | 焦点高亮 | 原生式半透明主色背景，**不画描边框、不叠加双重亮框** |
+| 鼠标 / 触控 | 所有 TV 控件同时保留点击路径，方便排查焦点问题 |
+
+### 5.1 文本输入与软键盘
+
+电视上没有鼠标，也不该让方向键被困在多个输入框里。因此所有需要打字的地方统一走
+「字段按钮 → 弹出单字段输入对话框」：
+
+- 按下「搜索关键词」「服务器地址」「端口」「密码」等**字段按钮**（OK）才弹出输入框；
+- 输入框 `autofocus` 并显式调用 `TextInput.show`，遥控器 OK 一定能**唤出软键盘**；
+- 方向键在软键盘上选字，OK 确认；按「完成 / 搜索」或弹窗里的「确定」提交；
+- 全局 TV 输入层在文本输入获焦时**不劫持任何按键**（含 Esc），避免抢走输入法光标操作；
+- 弹窗里的「取消 / 确定 / 关闭」等按钮同样遥控器可达，且始终有一个初始焦点。
+
+### 5.2 哔哩哔哩扫码登录
+
+登录全程**不需要在电视上打字**：弹窗展示 `qr_flutter` 渲染的二维码，用手机哔哩哔哩 App
+扫码并在手机上确认；电视端每 2 秒轮询状态，显示「等待扫码 / 已扫码 / 已过期 / 登录成功」，
+并提供「刷新二维码 / 退出登录 / 关闭」三个按钮。登录态只保存 Cookie 于本机，不保存账号密码。
 
 ## 6. 做了哪些适配
 
@@ -134,10 +154,50 @@ TV 桌面入口与品牌、遥控器 / 键盘 / 手柄输入、焦点导航、TV
 7. **应用信息**：关于页与检查更新指向本改版仓库；`TvAppInfo` 统一维护项目元信息。
 8. **CI**：GitHub Actions 生成 Android runner、注入 TV Manifest 与品牌资源，
    分别构建 3 个单 ABI release APK（arm64-v8a / armeabi-v7a / x86_64）。
+9. **网络媒体**（详见第 7 节）：新增「网络媒体」导航入口与 WebDAV / FTP 客户端、哔哩哔哩
+   Web API 客户端、只监听 `127.0.0.1` 的本机 HTTP 流代理（支持 Range），把远端音频 / 视频流
+   包装成 `http://` 交给原有 `Media()` 播放链路；`AudioService` 与播放队列无需改动。
+10. **固定 release 签名**：CI 强制使用同一把 keystore 出包，缺失签名 secrets 或检出
+    `CN=Android Debug` 证书都直接让构建失败；三个 ABI 共用同一证书，后续版本可直接覆盖安装。
 
 完整的逐轮修复记录与回滚锚点见 [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)。
 
-## 7. 下载与 ABI
+## 7. 网络媒体（WebDAV / FTP / 哔哩哔哩）
+
+解决电视本地容量有限、无法保存全部音乐的问题：**按需拉流、不落盘**，远端文件只在播放时
+经本机代理读取，不占用电视存储。入口在主导航「网络媒体」，下分两个标签。
+
+### 7.1 网络硬盘 / 共享网盘
+
+- 协议：**WebDAV**（即名称以 `web` 开头的网络硬盘 / 共享网盘协议，支持 HTTP / HTTPS、
+  Basic Auth、PROPFIND 列目录）与 **FTP**（匿名 / 用户名密码、PASV、REST 断点续传）。
+- 左侧管理连接配置（添加 / 编辑 / 删除），右侧浏览目录；支持「返回上级 / 刷新 /
+  播放全部音频 / 全部加入队列」以及「立即播放 / 加入队列」点击行为切换。
+- 识别 `mp3 / flac / wav / m4a / aac / ogg / opus / wma / ape / aiff / dsf / m4b…` 等音频格式。
+- 密码只保存在本机 `SharedPreferences`，不随仓库提交、不写日志。
+
+### 7.2 哔哩哔哩
+
+参考 [BiliMusic-Desktop](https://github.com/licpp/BiliMusic-Desktop) 的功能范围与交互：
+
+- 关键词搜索、分页、BV 号 / av 号 / 完整链接解析、分 P 展开；
+- 单独播放某个分 P、播放全部分 P、整组加入队列；
+- 音频流（DASH 音频轨，默认，更省流量）/ 视频流切换；
+- 搜索历史、**二维码扫码登录**（不登录也可搜索与播放）；
+- WBI 签名、CDN `Referer` / `User-Agent` / `Cookie` 请求头、失败回退旧接口。
+
+### 7.3 实现要点
+
+- 远端流统一编码成 `http://127.0.0.1:<port>/starnote/<base64url JSON>`；端口固定候选
+  `18765–18774`、token 固定，因此**应用重启后队列里的 URL 仍然有效**，元数据（标题 / 歌手 /
+  专辑 / 时长）也编码在 URL 里，无需重新联网枚举。
+- 代理支持 HTTP `Range`，输出正确的 `200` / `206`、`Accept-Ranges`、`Content-Length` 与
+  `Content-Range`，网络流可以拖动进度；上游不给总长度时退回 `200` 顺序流，避免截断。
+- `RemoteMediaRegistry` 在解析歌曲元数据时拦截代理 URL，避免误走 `File.exists()` /
+  本地标签读取而显示「文件不存在」；本地文件路径仍走原来的完整链路。
+- CI 注入 `android:usesCleartextTraffic="true"`，保证明文 HTTP WebDAV 与本机代理可用。
+
+## 8. 下载与 ABI
 
 | ABI | 适用设备 | 产物 |
 | --- | --- | --- |
@@ -152,10 +212,14 @@ TV 桌面入口与品牌、遥控器 / 键盘 / 手柄输入、焦点导航、TV
 > 强行构建的 x86 32 位包会缺少播放用的原生库，安装后无法出声，因此本改版**不产出**该架构，
 > 也不交付明知不可用的包。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
-安装：用文件管理器或 `adb install` 安装对应 ABI 的 APK。当前为 **debug 签名**，覆盖安装若提示
-签名不匹配，请先卸载旧版；不同 ABI 的 debug 证书也不相同。
+安装：用文件管理器或 `adb install` 安装对应 ABI 的 APK。自本版本起所有 APK 使用
+**同一把固定 release 签名**（`CN=StarNote TV`），三个 ABI 证书一致，后续版本可直接
+**覆盖安装，不再需要卸载重装**。CI 会拒绝任何缺失签名 secrets 或检出 Android Debug 证书的构建，
+因此不会再出现「不同 ABI 签名不匹配」。
 
-## 8. 检查更新
+> 从 `v1.0.0`（debug 签名）首次升级到本版本时，因证书不同仍需卸载一次旧版；此后即可正常覆盖安装。
+
+## 9. 检查更新
 
 应用内「设置 → 常规 → 检查更新」与启动静默检查都请求：
 
@@ -167,7 +231,7 @@ https://api.github.com/repos/midi-HL/myune_music_android_tv/releases/latest
 （例如 `v1.0.0`），与 `lib/tv/tv_app_info.dart` 中 `TvAppInfo.version` 对应；关于页里的
 仓库 / Issue / Releases 链接也指向本仓库。
 
-## 9. 从源码构建
+## 10. 从源码构建
 
 本机**不需要** Flutter / Rust / NDK：编译与 APK 校验全部由
 [`.github/workflows/build_android.yml`](.github/workflows/build_android.yml) 在 GitHub Actions 完成。
@@ -180,11 +244,17 @@ flutter pub get
 flutter build apk --release --target-platform android-arm64   # 或 android-arm / android-x64
 ```
 
+固定 release 签名需要在仓库 `Settings → Secrets and variables → Actions` 配置 4 个 secrets：
+`ANDROID_KEYSTORE_BASE64`（JKS 的 base64）、`ANDROID_KEYSTORE_PASSWORD`、
+`ANDROID_KEY_PASSWORD`、`ANDROID_KEY_ALIAS`。CI 用它们生成 `android/key.properties` 并切换
+`signingConfigs.release`；**任一缺失直接构建失败**，绝不回退到模板的 debug 签名。
+keystore 与密码不进入仓库。
+
 上游没有 `android/` 目录，CI 会用 `flutter create --platforms=android` 生成 runner，
 再注入 `ci/MainActivity.kt`、TV Manifest 补丁与 `ci/branding/` 品牌资源。三个 ABI 各由
 独立 job 构建，避免 Rust/cargokit 与 libmpv 下载任务互相覆盖产物。
 
-## 10. 开源协议
+## 11. 开源协议
 
 - **主体代码：Apache License 2.0**，全文见 [LICENSE](LICENSE)（与上游一致）
 - 本改版对上游的改动标注：[NOTICE](NOTICE)、[ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)
@@ -198,14 +268,14 @@ flutter build apk --release --target-platform android-arm64   # 或 android-arm 
 > NOTICE 与源码提供（或书面要约）义务。详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 > 以及 mpv / FFmpeg 官方许可。使用本仓库构建并对外分发 APK 前，请先自行完成合规核对。
 
-## 11. 反馈与贡献
+## 12. 反馈与贡献
 
 - 问题反馈：[GitHub Issues](https://github.com/midi-HL/myune_music_android_tv/issues)
 - 代码贡献：[Pull Requests](https://github.com/midi-HL/myune_music_android_tv/pulls)
 - 上游桌面版（Windows / Linux）的问题请提到[上游仓库](https://github.com/xiaobaimc/myune_music/issues)，
   本改版只处理 Android / Android TV 相关问题。
 
-## 12. 回滚
+## 13. 回滚
 
 本仓库保留完整历史与锚点 tag，可随时回退：
 
@@ -214,14 +284,15 @@ flutter build apk --release --target-platform android-arm64   # 或 android-arm 
 | `baseline-558a71f-0713` | 早期 Android 移植基线 |
 | `baseline-4168e51-pre-tv` | TV 适配开始前的完整状态 |
 | `tv-v2-focus-fix` / `tv-v3-focus-fix` / `tv-v4-focus-fix` | 各轮 TV 焦点修复版本 |
-| `v1.0.0` | 本开源化版本（关于页 / 检查更新 / 三 ABI） |
+| `v1.0.0` | 首个开源化版本（关于页 / 检查更新 / 三 ABI，debug 签名） |
+| `v1.1.0` | 网络媒体（WebDAV / FTP / 哔哩哔哩）+ 固定 release 签名版本 |
 
 ```bash
 git checkout tv-v4-focus-fix      # 回到某个锚点
 git revert <commit>               # 保留审计轨迹地撤销某次改动
 ```
 
-## 13. 致谢
+## 14. 致谢
 
 - [xiaobaimc/myune_music](https://github.com/xiaobaimc/myune_music) — 上游桌面版及其 Apache-2.0 开源代码
 - [mpv_audio_kit](https://github.com/ales-drnz/mpv_audio_kit)（BSD-3-Clause）与 mpv / FFmpeg 社区

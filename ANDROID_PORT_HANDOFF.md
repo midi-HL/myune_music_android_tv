@@ -1,6 +1,8 @@
 # MyuneMusic → Android 项目交接文档
 
 > 本文件是回档后的完整交接说明。代码基线按用户更正后的要求回到 2026-11-06 07:13 的 `558a71f`（11 点左右仓库里的版本、也是 `a28f2c9` 的前一个版本），仅额外接入 64 位 / 32 位双 ABI 构建；12:13 之后所有 UI、缩放、横屏、密度、原生视口 DPI、挖孔主题改动均已撤销。
+>
+> **当前状态（2026-11-09，v1.1.0）：以下第 1–12 节是 2026-11-06 回档阶段的「历史阶段记录」，仅作为审计轨迹保留，不代表当前实现。** 其中关于「debug 签名」「仓库保持 private」「四个 secrets 可选」「两 ABI」等描述均已过期：仓库 `midi-HL/myune_music_android_tv` 已转 public，首发 `v1.0.0` 后本轮 `v1.1.0` 已切换为**固定 release 签名**、CI 三 ABI、新增网络媒体（WebDAV / FTP / 哔哩哔哩）。各轮演进以第 13–18 节为准，尤其第 18 节为最新状态；历史章节中的旧结论不要直接套用到当前代码。
 
 ## 1. 项目是什么
 
@@ -488,3 +490,124 @@ Rust targets 增加 `x86_64-linux-android`。`mpv_audio_kit` 的 `abiFilters` �
 本轮为 `518a37f` 之后的新提交，tag `v1.0.0`。回滚：`git revert <本轮提交>`，
 或 checkout `tv-v4-focus-fix` / `baseline-4168e51-pre-tv`。仓库转 public 与 Release
 创建属远端状态变更，需单独撤销（把 visibility 改回 private、删除 Release/tag）。
+
+## 18. 网络媒体、固定 release 签名与完整代码审查（2026-11-09，v1.1.0）
+
+本轮从「开源化交付」转入**新功能开发**，用户要求直接改代码、以完成功能为优先，不要只给方案。
+
+### 18.1 用户要求
+
+- **网络硬盘 / 共享网盘**：从网络位置读取并播放乐曲，解决电视本地容量有限、无法保存全部音乐的问题；支持「名称以 `web` 开头的协议」与 FTP。按网络硬盘场景把前者解释为 **WebDAV**（未单独向用户确认），同时实现 FTP。
+- **哔哩哔哩**：支持网络视频流播放，参考 `https://github.com/licpp/BiliMusic-Desktop` 的功能范围与交互（搜索、分页、分 P、整组加队列、流式播放、扫码登录、重启恢复队列）。
+- **保持现有功能不受影响**；不使用 debug 签名（避免每次更新卸载重装），不展开签名方案讨论，签名细节自行决定。
+- 后续补充：**完整代码审查**、所有 UI 界面都要遥控器可控且适合电视端、**能正常唤出软键盘**、B 站登录**使用二维码**。
+- 环境约束：不要再控制真机 / 模拟器 / adb；不要再弹出 Git 选择账号页面。
+
+### 18.2 总体架构：不落盘、按需拉流
+
+- 用户痛点正是「电视存不下」，因此**不把远端文件缓存到本地**，改为本机 HTTP 流代理按需拉取、边下边播。
+- 已核实 `mpv_audio_kit` 的 `Media()` 明确支持 `http://`（也支持 `httpHeaders`），所以 **`AudioService` / `Player` 完全不用改**，网络媒体只需给 `Song.filePath` 一个本机 URL。
+- 网络媒体的 `filePath` 形如 `http://127.0.0.1:<port>/starnote/<base64url JSON>`，标题 / 歌手 / 专辑 / 时长等元数据直接编码进 URL。
+- `RemoteMediaRegistry.lookup()` 从 URL 自解码出 `Song`，让播放链路不误走 `File.exists()` / Rust 本地标签读取；`isNetwork()` 供所有「要碰文件系统」的分支提前判断。
+- `LocalStreamProxy` 只监听 `127.0.0.1:18765-18774`，把 WebDAV `GET` / FTP `RETR` / B 站 CDN 流转成 mpv 可顺序读取的字节流，支持 HTTP Range（`200` / `206` + `Content-Range`）。
+
+### 18.3 新增文件清单（13 个）
+
+服务层 `lib/services/network/`（9 个）：
+
+| 文件 | 职责 |
+| --- | --- |
+| `remote_entry.dart` | `RemoteEntry` 目录项 + 音频扩展名判断 |
+| `remote_source.dart` | `RemoteSourceType.webdav/ftp`、`RemoteSource` 配置模型、`RemoteSourceStore`（`shared_preferences` 持久化，密码不入库） |
+| `remote_stream.dart` | `RemoteStreamResult` / `RemoteStreamOpener`、`limitByteStream()`、`describeHttpRange()`、`formatRangeHeader()`、`guessContentType()` |
+| `webdav_client.dart` | `PROPFIND Depth:1` 列目录、`GET` + Basic Auth + Range；XML 用命名空间通配正则解析，不引入 `webdav` / `xml` 依赖 |
+| `ftp_client.dart` | `dart:io` 控制连接 + PASV 数据连接；`USER`/`PASS`/`TYPE I`/`PASV`/`LIST`/`SIZE`/`REST`/`RETR`；PASV 返回内网地址时回退控制连接对端；支持匿名 |
+| `bilibili_client.dart` | WBI 签名、搜索、BV/av 解析、详情与分 P、`playurl`（音频 / 视频流）、二维码登录 |
+| `local_stream_proxy.dart` | 本机代理、URL 编解码、Range → `200`/`206` |
+| `remote_media_registry.dart` | 代理 URL → `Song` 注册表 + `isNetwork()` |
+| `network_media_service.dart` | 统一门面：`initialize()` / `nasSong()` / `biliSong()` / `ensureProxy()` |
+
+页面层 `lib/page/network/`（4 个）：
+
+| 文件 | 职责 |
+| --- | --- |
+| `network_media_page.dart` | 两个遥控器可达标签 + `IndexedStack` |
+| `network_sources_view.dart` | 网络硬盘 / 网盘：源配置、目录浏览、单曲播放、整目录播放 / 加入队列 |
+| `bilibili_view.dart` | B 站：关键词搜索、链接 / BV / av 解析、分 P 展开、整组播放 / 加入队列、音频 / 视频流切换、扫码登录入口 |
+| `tv_network_widgets.dart` | `TvActionButton` 等 TV 控件、文本输入弹窗、二维码登录弹窗、`showTvAlert` |
+
+### 18.4 播放链路接入点（保持现有功能）
+
+- `lib/main.dart`：`RustLib.init()` 之后 `await NetworkMediaService.initialize()`（加载配置与登录态、启动代理）；代理失败不阻断本地音乐。
+- `lib/layout/main_view.dart`：设置之前新增「网络媒体」入口，`visible` 恒为 true，不参与隐藏页设置。
+- `lib/page/playlist/playlist_content_notifier.dart`：`_parseSongMetadata()` 开头拦截代理 URL；`_prepareSongForPlayback()` 对网络 URL 直接返回元信息；播放状态恢复路径加入 `RemoteMediaRegistry.isNetwork(songFilePath)`，避免 `File.exists()` 把网络队列清掉。
+- 播放统一走既有 `playFromDynamicList()` / `addSongsToPlayingQueue()`，与本地音乐共用队列、播放页与播放控件；`AudioService` 未改动。
+
+### 18.5 电视端 UI、软键盘与二维码登录
+
+- 所有按钮使用 `TvActionButton`（`TvFocusHighlight` + `onActivate`），对话框内按钮同样遥控器可达。
+- 文本输入采用「字段按钮 → 弹窗 → `autofocus: true` `TextField` → 显式 `SystemChannels.textInput.invokeMethod('TextInput.show')`」；全局 `TvInputScope` 在文本输入获焦时不劫持任何键，`TvFocusScope` 对 `EditableText` 的方向键返回 `KeyEventResult.ignored`。
+- `IndexedStack` 两个子页不同时 `autofocus`，初始焦点由顶层标签提供，避免离屏页面抢焦点。
+- `TvActionButton` 用 `LayoutBuilder` + `constraints.hasBoundedWidth`，兼容 `AlertDialog.actions` 的 `OverflowBar` 无界宽度（否则 `Spacer` / `Flexible` 会抛 RenderFlex 异常）。
+- 二维码轮询用 `_polling` 去重；「关闭」按钮在正常等待 / 已登录状态也保留初始焦点，保证 OK 键始终落在弹窗内。
+- B 站扫码登录：`qr_flutter` 的 `QrImageView` 渲染，`qrcode/generate` + `qrcode/poll` 轮询，成功后把 Cookie / `SESSDATA` 存入 `shared_preferences`。
+
+### 18.6 固定 release 签名
+
+- keystore 生成在**外层目录** `signing/starnote-release.jks`，不在 Git 仓库内、不提交；4 个 secrets 的本地副本也只在 `signing/*.txt`。
+- JDK21 `keytool`：alias `starnote`，`CN=StarNote TV, OU=Open Source, O=midi-HL, L=Shanghai, ST=Shanghai, C=CN`，RSA 2048，10950 天，JKS；SHA-256 指纹 `91:7B:AA:DB:C2:3D:EC:BA:6F:16:E6:8E:E1:72:BC:E6:84:92:1A:65:35:CB:F1:C2:60:D7:6C:CD:5B:8B:0A:4F`。
+- 4 个 secrets（`ANDROID_KEYSTORE_BASE64` / `ANDROID_KEYSTORE_PASSWORD` / `ANDROID_KEY_PASSWORD` / `ANDROID_KEY_ALIAS`）已写入 `midi-HL/myune_music_android` 与 `midi-HL/myune_music_android_tv` 两个仓库，`gh secret list` 已确认。
+- `.github/workflows/build_android.yml`：`Configure release signing (required)`，任一 secret 缺失直接 `exit 1`，绝不回退 debug；`Inspect APK` 用 `apksigner verify --print-certs` 断言拒绝 `CN=Android Debug`、要求证书含 `StarNote TV`。
+- 三个 ABI 共用同一证书 → 后续版本可直接覆盖安装。从 `v1.0.0`（debug 签名）首次升级到 `v1.1.0` 因证书不同仍需卸载一次，此后正常覆盖。
+
+### 18.7 CI 其它改动
+
+- Manifest 注入 `android:usesCleartextTraffic="true"`（本机 `http://` 流代理需要明文流量）。
+- `flutter pub get` 之后断言 `qr_flutter` 同时出现在 `pubspec.yaml` 与 `pubspec.lock`。
+- 保留三 ABI matrix（`arm64-v8a` / `armeabi-v7a` / `x86_64`）、Rust targets、SAF / TV Manifest / branding / `libmpv.so` 校验。
+
+### 18.8 依赖
+
+- 新增 `qr_flutter: ^4.1.0`（BSD-3-Clause，传递依赖 `qr` 解析到支持 Dart 3 的 3.0.x），只用于二维码渲染，纯 Dart 绘制、无平台通道。
+- 复用已有 `http` / `shared_preferences` / `crypto`：WBI 签名用 `crypto.md5`，删除了最初手写的纯 Dart MD5 实现。
+- 本机没有 Flutter / Dart CLI，`pubspec.lock` 不本机更新，由 CI `flutter pub get` 生成并断言。
+
+### 18.9 文档与版本
+
+- `TvAppInfo.version` → `1.1.0`（关于页、检查更新自动跟随）。
+- `README.md` / `README.en.md`：新增「5.1 文本输入与软键盘」「5.2 哔哩哔哩扫码登录」「第 7 节 网络媒体（WebDAV / FTP / 哔哩哔哩）」；签名说明改为固定 release；新增 4 个签名 secrets 的构建说明、`v1.0.0` 首次升级需卸载一次的注记；回滚表新增 `v1.1.0`。
+- `NOTICE` 追加本轮改动声明；`THIRD_PARTY_NOTICES.md` 新增 `qr_flutter` / `qr` 的 BSD-3-Clause 许可证与版权声明，并说明网络媒体实现均为本项目自研 Apache-2.0 Dart 源码、未引入额外第三方协议库。
+
+### 18.10 完整代码审查发现并修复的问题
+
+1. `av123` 被当作 `bvid` 传给 B 站接口导致 `-404` → 新增 `_videoParams()` 转成 `aid=123`，用于 `view()` 与 `streamUrl()`。
+2. 手写 MD5 → 发现项目已有 `crypto: ^3.0.6`，改用 `crypto.md5`。
+3. `local_stream_proxy.dart` 初稿用了 `dart:io` 并不存在的 `headersSent` 扩展 → 删除，改为在 `catch` 中忽略「响应头已发出后的二次赋值」异常。
+4. `onError` 回调签名错误 → 改为 `(Object _, StackTrace __)`。
+5. 上游不返回总长度却带 Range 时可能返回非法 `206` → `isPartial = rangeHeader != null && total != null`。
+6. 上游无总长度 + 带 Range 会按请求起点截断并错误地用 `200` 告诉 mpv「文件就这么大」 → 新增 `forceFull`，关掉这次带 Range 的流、重新从 0 顺序拉。
+7. `TvActionButton` 在 `AlertDialog.actions` 无界宽度下崩溃 → `LayoutBuilder` + `hasBoundedWidth` 分支。
+8. 二维码 `Timer.periodic` 在网络慢时并发叠加 → `_polling` 去重 + `try/finally` 释放。
+9. 二维码弹窗正常等待 / 已登录状态可能无初始焦点 → 修正「关闭」按钮 `autofocus` 条件。
+10. 代理启动失败只能提示重启应用 → 新增 `NetworkMediaService.ensureProxy()`，页面播放前重试启动。
+11. `NetworkSourcesView` 与 `BilibiliView` 同时 `autofocus` → 删除子页 `autofocus`，由主标签提供初始焦点。
+12. 网络 URL 仍被 `_prepareSongForPlayback()` 交给 Rust 本地标签读取 → 新增 `RemoteMediaRegistry.isNetwork()` 提前返回。
+13. 多个纯 Dart 服务文件缺 `import 'dart:async';` → 补齐。
+14. `bilibili_view.dart` 的 `_ensureProxy()` 返回类型应为 `Future<bool>`、缺少 `Song` 类型 import → 修正。
+15. 首轮静态复核脚本误报（workflow 内嵌 Python heredoc 未 `dedent`、Dart 词法扫描先剥注释导致字符串误伤、文档中的 secret 变量名被误判为泄露）→ 改为 `textwrap.dedent()` + `compile()`、按字符的词法扫描器、读取 `signing/*.txt` 真实值再做敏感信息比对，最终 **37/37 ALL PASS**。
+
+### 18.11 静态复核与验收
+
+- 本机静态复核覆盖：`git diff --check`、workflow YAML 解析、内嵌 Python `compile()`、Dart 词法括号平衡、关键断言、敏感信息扫描（对照 `signing/*.txt` 真实值）、`.jks` / 私钥头不得被 tracked。代码审查后首轮 **37/37 ALL PASS**；提交前按更严格口径复跑 **66/66 ALL PASS**（含 13 个 Dart 文件词法括号平衡、workflow 内嵌 Python 编译、20 项关键断言、TV 焦点 / 软键盘 / 二维码断言、短公开别名与短值豁免的密钥扫描）。
+- **本机没有 Flutter / Dart CLI**，无法运行 `flutter analyze`；最终 Dart 编译与 APK 产物校验全部依赖 CI `flutter build apk --release`。这是本轮唯一无法本机闭环的验收点。
+- CI 三 job 全部 success 后，下载三个单 ABI APK 到外层 `tv_apks/`，创建 Release `v1.1.0`，附双语 `RELEASE_NOTES_v1.1.0.md`。
+
+### 18.12 用户环境约束（必须继续遵守）
+
+- 不再控制真机 / 模拟器 / adb（用户明确「不要再控制我的电视了」「算了，你专心写代码吧」）。
+- 本地 Git 已禁用交互式凭据：`credential.helper ""`、`credential.guiPrompt false`、`credential.interactive never`。所有联网 Git 操作一律用 `gh auth token` 构造 `http.extraheader=AUTHORIZATION: basic ...` 直传，避免再次弹出账号选择页面。
+
+### 18.13 回滚
+
+- 本轮为 `4ca34a4` 之后的提交，tag `v1.1.0`。回滚：`git revert <本轮提交>`，或 checkout 之前的 tag / 分支；Release 与 APK 属远端状态，需单独删除。
+- 注意签名切换的单向影响：`v1.0.0` 为 debug 证书，`v1.1.0` 起为固定 release 证书；若用户从 `v1.0.0` 升级需卸载一次旧版，反向回退到 debug 包同样需要卸载。

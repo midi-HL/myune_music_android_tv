@@ -24,13 +24,14 @@
 4. [Developer & maintainer](#4-developer--maintainer)
 5. [TV / remote / keyboard / gamepad controls](#5-tv--remote--keyboard--gamepad-controls)
 6. [What was adapted](#6-what-was-adapted)
-7. [Downloads & ABIs](#7-downloads--abis)
-8. [Update checks](#8-update-checks)
-9. [Building from source](#9-building-from-source)
-10. [License](#10-license)
-11. [Feedback & contributions](#11-feedback--contributions)
-12. [Rollback](#12-rollback)
-13. [Credits](#13-credits)
+7. [Network media (WebDAV / FTP / Bilibili)](#7-network-media-webdav--ftp--bilibili)
+8. [Downloads & ABIs](#8-downloads--abis)
+9. [Update checks](#9-update-checks)
+10. [Building from source](#10-building-from-source)
+11. [License](#11-license)
+12. [Feedback & contributions](#12-feedback--contributions)
+13. [Rollback](#13-rollback)
+14. [Credits](#14-credits)
 
 ---
 
@@ -61,7 +62,7 @@ and the existing phone behaviour (immersive mode, UI scaling, SAF) is unchanged.
 | Original upstream README | [UPSTREAM_README.md](UPSTREAM_README.md) (preserved verbatim) |
 | **This fork's repository** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | This fork's license | **Apache License 2.0** (same as upstream) |
-| This fork's version | `1.0.0` (see `lib/tv/tv_app_info.dart`) |
+| This fork's version | `1.1.0` (see `lib/tv/tv_app_info.dart`) |
 
 The **full upstream commit history is preserved** (no squash, no history rewrite). All port
 work is recorded as additional commits and tags so it can be rolled back at any time. See
@@ -84,10 +85,12 @@ version:
 - Extras: fuzzy / pinyin / initial-letter search, local playback statistics, audio analysis page
 - **The upstream Windows / Linux builds and features are unaffected by this port**
 
-**What differs lives only in the platform and input layers** (see §6): Android platform
-isolation, SAF storage access, the TV launcher entry and branding, remote / keyboard /
-gamepad input, spatial focus navigation, TV control reachability, and app info / update
-checks pointing at this repository. Upstream feature logic has not been replaced.
+**What differs lives in the platform layer, the input layer and the new network-media entry**
+(see §6–§7): Android platform isolation, SAF storage access, the TV launcher entry and
+branding, remote / keyboard / gamepad input, spatial focus navigation, TV control
+reachability, app info / update checks pointing at this repository, a fixed release
+signature, and the new WebDAV / FTP / Bilibili streaming in the "Network media" page.
+Existing local-music playback logic has not been replaced and remains unaffected.
 
 ## 4. Developer & maintainer
 
@@ -121,6 +124,31 @@ queue, and reach every settings item.
 | Seek bar | Excluded from D-pad focus (a Slider would swallow all four directions); drag with mouse/touch, or seek with media keys / triggers |
 | Effects / EQ sliders | Horizontal: ←/→ changes value, ↑/↓ leaves. Vertical bands: ↑/↓ changes value, ←/→ leaves |
 | Focus highlight | Native-style translucent primary-colour background; **no outline, no double highlight** |
+| Mouse / touch | Every TV control also keeps a tap path, useful when debugging focus issues |
+
+### 5.1 Text input and the soft keyboard
+
+A TV has no mouse, and the D-pad must not get trapped between several text fields. Every
+place that needs typing therefore uses a **"field button → single-field input dialog"** flow:
+
+- Press OK on a field button ("Search keyword", "Server address", "Port", "Password", …)
+  to open the input dialog.
+- The field is `autofocus` and `TextInput.show` is invoked explicitly, so OK on the remote
+  **always brings up the soft keyboard**.
+- D-pad moves between IME candidates, OK confirms; "Done / Search" or the dialog's
+  "Confirm" button submits.
+- The global TV input layer **does not intercept any key (including Esc) while a text field
+  is focused**, so it cannot steal the IME's cursor handling.
+- Dialog buttons (Cancel / Confirm / Close) are all remote-reachable and one always has
+  the initial focus.
+
+### 5.2 Bilibili QR-code login
+
+Login needs **no typing on the TV**: the dialog shows a QR code rendered by `qr_flutter`,
+you scan it with the Bilibili mobile app and confirm on your phone. The TV polls the state
+every 2 seconds ("waiting / scanned / expired / success") and offers
+"Refresh QR code / Log out / Close". Only the login cookie is stored locally; no account
+or password is saved.
 
 ## 6. What was adapted
 
@@ -152,10 +180,60 @@ queue, and reach every settings item.
    the single source of truth for project metadata.
 8. **CI** — GitHub Actions generates the Android runner, injects the TV Manifest and
    branding, and builds three single-ABI release APKs (arm64-v8a / armeabi-v7a / x86_64).
+9. **Network media** (see §7) — a new "Network media" navigation entry with WebDAV / FTP
+   clients, a Bilibili Web API client, and a loopback-only HTTP streaming proxy with Range
+   support that wraps remote streams into `http://` URLs for the existing `Media()` playback
+   path. `AudioService` and the playing queue needed no changes.
+10. **Fixed release signing** — CI enforces one keystore for all builds; missing signing
+    secrets or a detected `CN=Android Debug` certificate fail the build. All three ABIs share
+    the same certificate, so later versions can be installed over the previous one.
 
 Per-round fix notes and rollback anchors are in [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md).
 
-## 7. Downloads & ABIs
+## 7. Network media (WebDAV / FTP / Bilibili)
+
+Solves the limited local storage of a TV: **stream on demand, never cache to disk**. Remote
+files are read through the local proxy only while playing, so the whole NAS library costs no
+TV storage. The entry is "Network media" in the main rail, with two tabs.
+
+### 7.1 Network drives / shared drives
+
+- Protocols: **WebDAV** (the "web…" network-drive protocol: HTTP / HTTPS, Basic Auth,
+  PROPFIND directory listing) and **FTP** (anonymous / user+password, PASV, REST resume).
+- Left pane manages connections (add / edit / delete); right pane browses directories.
+  "Up / Refresh / Play all audio / Add all to queue" plus a "Play now / Enqueue" tap-mode
+  toggle are available.
+- Recognises `mp3 / flac / wav / m4a / aac / ogg / opus / wma / ape / aiff / dsf / m4b…`.
+- Passwords live in local `SharedPreferences` only; never committed, never logged.
+
+### 7.2 Bilibili
+
+Following the feature scope and interaction of
+[BiliMusic-Desktop](https://github.com/licpp/BiliMusic-Desktop):
+
+- Keyword search, pagination, BV / av number / full-link parsing, multi-part (分 P) expansion
+- Play a single part, play all parts, or enqueue the whole group
+- Audio stream (DASH audio track, default and lighter) / video stream switch
+- Search history and **QR-code login** (login optional for search and playback)
+- WBI signing, CDN `Referer` / `User-Agent` / `Cookie` headers, fallback to legacy endpoints
+
+### 7.3 Implementation notes
+
+- Each remote stream is encoded as
+  `http://127.0.0.1:<port>/starnote/<base64url JSON>`. Ports are a fixed candidate range
+  `18765–18774` with a fixed token, so **URLs in the playing queue still work after an app
+  restart**; metadata (title / artist / album / duration) is embedded in the URL too, so no
+  re-enumeration is needed.
+- The proxy supports HTTP `Range` and emits correct `200` / `206`, `Accept-Ranges`,
+  `Content-Length` and `Content-Range`, so remote streams are seekable. If the upstream does
+  not report a total length it falls back to a `200` sequential stream to avoid truncation.
+- `RemoteMediaRegistry` intercepts proxy URLs during metadata parsing so they never go
+  through `File.exists()` / local tag reading (which would show "file not found"); local
+  paths keep the original full pipeline.
+- CI injects `android:usesCleartextTraffic="true"` so plain-HTTP WebDAV and the loopback
+  proxy work.
+
+## 8. Downloads & ABIs
 
 | ABI | Target devices | Artifact |
 | --- | --- | --- |
@@ -171,11 +249,16 @@ Per-round fix notes and rollback anchors are in [ANDROID_PORT_HANDOFF.md](ANDROI
 > library and produce no sound, so this port **does not ship** that ABI rather than deliver a
 > knowingly broken package. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-Install with a file manager or `adb install`. Builds currently use a **debug signature**;
-if an overwrite install reports a signature mismatch, uninstall the previous build first.
-Debug certificates also differ between ABIs.
+Install with a file manager or `adb install`. Starting with this version all APKs use the
+**same fixed release signature** (`CN=StarNote TV`); all three ABIs share the certificate,
+so later versions can be **installed over the previous one with no uninstall/reinstall**.
+CI refuses builds with missing signing secrets or a detected Android Debug certificate, so
+cross-ABI signature mismatches can no longer occur.
 
-## 8. Update checks
+> Upgrading from `v1.0.0` (debug-signed) for the first time still requires one uninstall
+> because the certificate changed; every upgrade after that installs cleanly.
+
+## 9. Update checks
 
 Both **Settings → General → Check for updates** and the silent startup check query:
 
@@ -188,7 +271,7 @@ Release tags follow `vX.Y.Z` (e.g. `v1.0.0`) and correspond to `TvAppInfo.versio
 `lib/tv/tv_app_info.dart`. The About dialog's repository / Issues / Releases links point
 here as well.
 
-## 9. Building from source
+## 10. Building from source
 
 You do **not** need Flutter / Rust / NDK locally: building and APK verification are handled
 entirely by [`.github/workflows/build_android.yml`](.github/workflows/build_android.yml)
@@ -202,12 +285,19 @@ flutter pub get
 flutter build apk --release --target-platform android-arm64   # or android-arm / android-x64
 ```
 
+Fixed release signing requires four repository secrets under
+`Settings → Secrets and variables → Actions`: `ANDROID_KEYSTORE_BASE64` (base64 of the JKS),
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_PASSWORD`, `ANDROID_KEY_ALIAS`. CI writes
+`android/key.properties` from them and switches to `signingConfigs.release`; **any missing
+value fails the build** instead of falling back to the template debug signature. The
+keystore and passwords are never committed.
+
 Upstream has no `android/` directory, so CI generates the runner with
 `flutter create --platforms=android`, then injects `ci/MainActivity.kt`, the TV Manifest
 patch and `ci/branding/` assets. Each ABI is built in its own job so Rust/cargokit and
 libmpv download tasks cannot overwrite each other's outputs.
 
-## 10. License
+## 11. License
 
 - **Source code: Apache License 2.0** — full text in [LICENSE](LICENSE) (same as upstream)
 - Changes made to upstream: [NOTICE](NOTICE), [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)
@@ -223,7 +313,7 @@ libmpv download tasks cannot overwrite each other's outputs.
 > See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and the official mpv / FFmpeg
 > licenses. Complete your own compliance review before distributing built APKs publicly.
 
-## 11. Feedback & contributions
+## 12. Feedback & contributions
 
 - Issues: [GitHub Issues](https://github.com/midi-HL/myune_music_android_tv/issues)
 - Pull requests: [GitHub PRs](https://github.com/midi-HL/myune_music_android_tv/pulls)
@@ -231,7 +321,7 @@ libmpv download tasks cannot overwrite each other's outputs.
   [upstream issue tracker](https://github.com/xiaobaimc/myune_music/issues); this fork
   only handles Android / Android TV issues.
 
-## 12. Rollback
+## 13. Rollback
 
 Full history and anchor tags are preserved:
 
@@ -240,14 +330,15 @@ Full history and anchor tags are preserved:
 | `baseline-558a71f-0713` | Early Android port baseline |
 | `baseline-4168e51-pre-tv` | State immediately before TV work started |
 | `tv-v2-focus-fix` / `tv-v3-focus-fix` / `tv-v4-focus-fix` | Successive TV focus fix rounds |
-| `v1.0.0` | This open-source release (app info / update checks / three ABIs) |
+| `v1.0.0` | First open-source release (app info / update checks / three ABIs, debug-signed) |
+| `v1.1.0` | Network media (WebDAV / FTP / Bilibili) + fixed release signing |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor
 git revert <commit>               # undo a change while keeping the audit trail
 ```
 
-## 13. Credits
+## 14. Credits
 
 - [xiaobaimc/myune_music](https://github.com/xiaobaimc/myune_music) — upstream desktop app and its Apache-2.0 source
 - [mpv_audio_kit](https://github.com/ales-drnz/mpv_audio_kit) (BSD-3-Clause) and the mpv / FFmpeg communities

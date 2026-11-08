@@ -19,7 +19,8 @@ env:
   # target-platform，避免 Rust/cargokit 与 libmpv 下载任务在多 ABI 下互相覆盖产物。
   # 上游 libmpv-r13 只提供 arm64 / armv7 / x86_64 三种预编译库，没有 x86 32 位，
   # 因此不产出 x86（32 位）APK；详见 README.md 与 THIRD_PARTY_NOTICES.md。
-  # 正式签名所需的 4 个 secrets；未配置时保持 Flutter 模板的 debug 签名。
+  # 固定 release 签名所需的 4 个 secrets。必须全部配置：任何一项缺失都直接
+  # 让构建失败，绝不回退到 Flutter 模板的 debug 签名（否则用户更新时要卸载重装）。
   SIGNING_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
   SIGNING_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
   SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
@@ -119,6 +120,9 @@ jobs:
           test -f android/app/build.gradle.kts
           grep -F "xiaobaimc/mpv_audio_kit.git" pubspec.lock
           grep -F "e87688132c2fc1b0960877a59a7b5a535b64917a" pubspec.lock
+          # 二维码登录依赖：确认 create 没有把 pubspec.yaml 覆盖掉，且已解析进锁文件。
+          grep -F "qr_flutter:" pubspec.yaml
+          grep -F "qr_flutter" pubspec.lock
           grep -F "kotlin.jvm.target.validation.mode=warning" android/gradle.properties
 
       # file_picker 10.2.0 的 Groovy 脚本写死 compileSdk 34，但它依赖的
@@ -244,6 +248,21 @@ jobs:
               text = text[:app_start] + tag + text[app_end:]
               print("injected android:label")
 
+          # 网络音乐（WebDAV / FTP / B 站 CDN）经由 127.0.0.1 的本机 HTTP 代理
+          # 交给 mpv，部分 Android 网络栈会拦截明文 HTTP；显式放开 cleartext，
+          # 使 http:// 的 WebDAV 与本机代理流都能正常连接。
+          if "android:usesCleartextTraffic=" not in text:
+              app_start = text.find("<application")
+              if app_start < 0:
+                  raise SystemExit("cannot locate <application> tag")
+              app_end = text.find(">", app_start)
+              if app_end < 0:
+                  raise SystemExit("cannot locate end of <application> tag")
+              tag = text[app_start:app_end]
+              tag = tag + '\n        android:usesCleartextTraffic="true"'
+              text = text[:app_start] + tag + text[app_end:]
+              print("injected android:usesCleartextTraffic")
+
           manifest.write_text(text, encoding="utf-8")
 
           final = manifest.read_text(encoding="utf-8")
@@ -254,6 +273,7 @@ jobs:
               "android.intent.category.LEANBACK_LAUNCHER",
               "android:banner=",
               'android:label="星音 StarNote"',
+              'android:usesCleartextTraffic="true"',
           ):
               if token not in final:
                   raise SystemExit("TV manifest patch incomplete: missing " + token)
@@ -287,15 +307,15 @@ jobs:
           print("branding applied: tv_banner.png + launcher icons")
           PY
 
-      # 可选正式签名：4 个 secrets 齐全时切换 release signingConfig；
-      # 任一缺失则完全不动 runner，保留模板的 debug 签名用于本轮真机测试。
-      - name: Configure release signing (optional)
+      # 固定 release 签名：4 个 secrets 必须齐全。绝不使用 debug 签名，
+      # 保证三个 ABI 的 APK 共用同一证书，后续版本可以直接覆盖安装。
+      - name: Configure release signing (required)
         run: |
           set -e
           if [ -z "$SIGNING_KEYSTORE_B64" ] || [ -z "$SIGNING_STORE_PASSWORD" ] || \
              [ -z "$SIGNING_KEY_PASSWORD" ] || [ -z "$SIGNING_KEY_ALIAS" ]; then
-            echo "Release signing secrets not configured; keeping debug signing."
-            exit 0
+            echo "::error::缺少固定 release 签名所需的 GitHub Secrets（ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD / ANDROID_KEY_PASSWORD / ANDROID_KEY_ALIAS）。拒绝使用 debug 签名出包。"
+            exit 1
           fi
           printf '%s' "$SIGNING_KEYSTORE_B64" | base64 -d > android/app/upload-keystore.jks
           python3 - <<'PY'
@@ -375,7 +395,17 @@ jobs:
           sha256sum build/app/outputs/flutter-apk/*.apk
           apksigner="${ANDROID_HOME}/build-tools/${ANDROID_BUILD_TOOLS}/apksigner"
           for apk in build/app/outputs/flutter-apk/*.apk; do
-            "$apksigner" verify --print-certs "$apk" | head -12 || true
+            certs=$("$apksigner" verify --print-certs "$apk" 2>&1)
+            echo "$certs" | head -12
+            # 必须是我们自己的固定 release 证书，不允许出现 Android Debug 证书。
+            if echo "$certs" | grep -qi "CN=Android Debug"; then
+              echo "::error::$apk 使用了 debug 签名，拒绝出包"
+              exit 1
+            fi
+            if ! echo "$certs" | grep -qi "StarNote TV"; then
+              echo "::error::$apk 未使用固定 release 签名（未找到 StarNote TV 证书）"
+              exit 1
+            fi
             unzip -l "$apk" | grep -F "lib/${{ matrix.abi }}/libmpv.so"
             unzip -l "$apk" | grep -F "lib/${{ matrix.abi }}/librust_lib_myune_music.so"
           done
