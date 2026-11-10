@@ -64,6 +64,10 @@ class BilibiliViewState extends State<BilibiliView>
   List<Song> _favorites = <Song>[];
   List<Song> _history = <Song>[];
 
+  // 详情页「播放全部」按钮的焦点节点：视频详情加载完成后把焦点落到这里，
+  // 而不是停留在原位置（用户按 OK 打开详情时焦点仍在列表项上）。
+  final FocusNode _playAllFocusNode = FocusNode(debugLabel: 'bili-play-all');
+
   @override
   bool get wantKeepAlive => true;
 
@@ -74,6 +78,12 @@ class BilibiliViewState extends State<BilibiliView>
     _loadSearchHistory();
     _loadLibrary();
     _loadRecommend();
+  }
+
+  @override
+  void dispose() {
+    _playAllFocusNode.dispose();
+    super.dispose();
   }
 
   Future<void> _loadSearchHistory() async {
@@ -391,6 +401,19 @@ class BilibiliViewState extends State<BilibiliView>
         _detail = detail;
         _detailLoading = false;
       });
+      // 详情面板就绪后把焦点落到「播放全部」：从这里按向下直接进入下方
+      // 分 P 选择区，不必绕到旁侧视频列表或收藏区。
+      if (detail.pages.isNotEmpty) {
+        // 详情面板与 ExcludeFocus 有重建过程，等两帧再落焦，
+        // 保证外部 FocusNode 已经 attach 完成（与 TvFocusController 一致）。
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _playAllFocusNode.canRequestFocus) {
+              _playAllFocusNode.requestFocus();
+            }
+          });
+        });
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -898,6 +921,7 @@ class BilibiliViewState extends State<BilibiliView>
                 child: TvActionButton(
                   label: '播放全部',
                   icon: Icons.play_arrow,
+                  focusNode: _playAllFocusNode,
                   onPressed: () => _playAllPages(enqueue: false),
                 ),
               ),

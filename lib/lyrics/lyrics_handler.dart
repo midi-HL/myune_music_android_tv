@@ -11,6 +11,8 @@ import '../page/setting/settings_provider.dart';
 import '../src/rust/api/audio_info.dart';
 import '../services/notification_service.dart';
 import '../services/android_content_resolver.dart';
+import '../services/network/bilibili_client.dart';
+import '../services/network/network_media_service.dart';
 import '../services/network/remote_media_registry.dart';
 
 import 'decryptor/krc_decryptor.dart';
@@ -121,17 +123,21 @@ class LyricsHandler {
     // 媒体标识当成文件名显示出来。这里直接跳过所有本地文件类歌词来源，
     // 只保留在线歌词（若用户启用），彻底消除误报。
     if (RemoteMediaRegistry.isNetwork(songFilePath)) {
-      if (_settingsProvider.enableOnlineLyrics && song != null) {
-        try {
-          unawaited(
-            _loadOnlineLyricsPipeline(
-              song,
-              preferredSource: _preferredOnlineSource(),
+      if (song != null) {
+        unawaited(_loadNetworkLyricsPipeline(song, songFilePath));
+      } else if (_settingsProvider.enableOnlineLyrics) {
+        // 拿不到 Song 时保守回退到在线歌词，避免直接空歌词。
+        unawaited(
+          _loadNetworkLyricsPipeline(
+            Song(
+              title: songFilePath,
+              artist: '未知歌手',
+              album: '网络媒体',
+              filePath: songFilePath,
             ),
-          );
-        } catch (_) {
-          // 在线歌词失败不影响播放。
-        }
+            songFilePath,
+          ),
+        );
       }
       return;
     }
@@ -421,6 +427,135 @@ class LyricsHandler {
       _currentLyrics = [];
       _notifyListeners();
     }
+  }
+
+  // ===== 网络媒体的字幕 / 歌词 =====
+
+  /// 网络媒体的歌词链路（按优先级）：
+  ///   1. B 站官方 CC 字幕：视频自带字幕时直接在歌词区域按时间轴呈现；
+  ///   2. 网盘音频同目录的同名外置字幕 / LRC（.lrc/.srt/.ass/.ssa/.vtt）；
+  ///   3. 在线歌词（用户启用时）作为最后的兜底。
+  /// 全程异步、不阻塞播放；每一步都校验当前歌曲未被切走。
+  Future<void> _loadNetworkLyricsPipeline(Song song, String path) async {
+    bool stillCurrent() => _getCurrentSong()?.filePath == path;
+
+    // 1) B 站官方字幕
+    final target = RemoteMediaRegistry.decodeTarget(path);
+    if (target != null && target['k'] == 'bili') {
+      final bvid = (target['b'] ?? '').toString();
+      final cidRaw = target['c'];
+      final cid = cidRaw is num
+          ? cidRaw.toInt()
+          : (int.tryParse(cidRaw?.toString().trim() ?? '') ?? 0);
+      if (bvid.isNotEmpty && cid > 0) {
+        try {
+          final cues = await BiliClient.instance.fetchSubtitles(
+            bvid: bvid,
+            cid: cid,
+          );
+          if (!stillCurrent()) return;
+          if (cues.isNotEmpty) {
+            final lines = cues
+                .map(
+                  (cue) => LyricLine(
+                    timestamp: cue.start,
+                    texts: <String>[cue.text],
+                  ),
+                )
+                .toList();
+            _currentLyrics = _processInterludes(lines);
+            _notifyListeners();
+            return;
+          }
+        } catch (_) {
+          // 字幕接口不可用（风控 / 无字幕），继续走后面的来源。
+        }
+      }
+    }
+
+    // 2) 网盘同目录同名外置字幕
+    try {
+      final bytes = await NetworkMediaService.sidecarLyricsFor(path);
+      if (!stillCurrent()) return;
+      if (bytes != null && bytes.isNotEmpty) {
+        final lines = _parseNetworkSidecar(bytes);
+        if (lines.isNotEmpty) {
+          _currentLyrics = lines;
+          _notifyListeners();
+          return;
+        }
+      }
+    } catch (_) {
+      // 网盘没有同名文件时静默跳过。
+    }
+
+    // 3) 在线歌词兜底
+    if (!_settingsProvider.enableOnlineLyrics) return;
+    try {
+      await _loadOnlineLyricsPipeline(
+        song,
+        preferredSource: _preferredOnlineSource(),
+      );
+    } catch (_) {
+      // 在线歌词失败不影响播放。
+    }
+  }
+
+  /// 解析网盘同名外置字幕：先按 LRC 试，再按 SRT / WebVTT 试。
+  List<LyricLine> _parseNetworkSidecar(Uint8List bytes) {
+    final text = _decodeUtf8(bytes);
+    if (text == null || text.trim().isEmpty) return <LyricLine>[];
+
+    final lrc = _parseLrcContent(text.split(RegExp(r'\r?\n')));
+    if (lrc.isNotEmpty) return lrc;
+
+    final lines = <LyricLine>[];
+    for (final block in text.split(RegExp(r'\r?\n\s*\r?\n'))) {
+      final rows = block
+          .split(RegExp(r'\r?\n'))
+          .where((row) => row.trim().isNotEmpty)
+          .toList(growable: false);
+      var timeIndex = -1;
+      String? timeRow;
+      for (var i = 0; i < rows.length; i++) {
+        if (rows[i].contains('-->')) {
+          timeIndex = i;
+          timeRow = rows[i];
+          break;
+        }
+      }
+      if (timeRow == null) continue;
+      final start = _parseSubtitleTime(timeRow.split('-->').first.trim());
+      if (start == null) continue;
+      final content = rows
+          .sublist(timeIndex + 1)
+          .join(' ')
+          .replaceAll(RegExp(r'<[^>]*>'), '')
+          .replaceAll(RegExp(r'\{[^}]*\}'), '')
+          .trim();
+      if (content.isEmpty) continue;
+      lines.add(
+        LyricLine(timestamp: start, texts: <String>[content]),
+      );
+    }
+    if (lines.isEmpty) return <LyricLine>[];
+    lines.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    return _processInterludes(lines);
+  }
+
+  /// 解析 `HH:MM:SS,mmm` / `MM:SS.mmm` 这类 SRT / VTT 时间戳。
+  Duration? _parseSubtitleTime(String raw) {
+    final value = raw.replaceAll(',', '.').trim();
+    final parts = value.split(':');
+    if (parts.length < 2 || parts.length > 3) return null;
+    final seconds = double.tryParse(parts.last);
+    if (seconds == null) return null;
+    final minutes = int.tryParse(parts[parts.length - 2]);
+    if (minutes == null) return null;
+    final hours = parts.length == 3 ? (int.tryParse(parts[0]) ?? 0) : 0;
+    return Duration(
+      milliseconds: ((hours * 3600 + minutes * 60 + seconds) * 1000).round(),
+    );
   }
 
   // 解析歌词

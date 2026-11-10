@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
+
 import '../../page/playlist/playlist_models.dart';
 import 'bili_library.dart';
 import 'bilibili_client.dart';
@@ -188,6 +190,45 @@ class NetworkMediaService {
     );
     RemoteMediaRegistry.register(url, song);
     return song;
+  }
+
+  /// 网盘音频同目录下的同名外置字幕 / 歌词（.lrc / .srt / .ass / .ssa / .vtt）。
+  ///
+  /// 网络媒体不落盘，因此不能直接 `File.exists()`；改为按原路径换扩展名，
+  /// 经本机流代理按需读取（鉴权与协议由代理补齐）。返回原始字节，
+  /// 由 LyricsHandler 按 LRC / SRT 分别解析，避免服务层依赖歌词模型。
+  static Future<Uint8List?> sidecarLyricsFor(String mediaUrl) async {
+    final target = RemoteMediaRegistry.decodeTarget(mediaUrl);
+    if (target == null || target['k'] != 'nas') return null;
+    final sourceId = (target['s'] ?? '').toString();
+    final path = (target['p'] ?? '').toString();
+    if (sourceId.isEmpty || path.isEmpty) return null;
+    final dot = path.lastIndexOf('.');
+    final slash = path.lastIndexOf('/');
+    if (dot <= slash) return null;
+    final base = path.substring(0, dot);
+    for (final ext in const <String>['lrc', 'srt', 'ass', 'ssa', 'vtt']) {
+      final String url;
+      try {
+        url = LocalStreamProxy.instance.urlForNas(sourceId, '$base.$ext');
+      } catch (_) {
+        return null;
+      }
+      try {
+        final response = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 8));
+        if (response.statusCode >= 200 &&
+            response.statusCode < 300 &&
+            response.bodyBytes.isNotEmpty &&
+            response.bodyBytes.length <= 512 * 1024) {
+          return Uint8List.fromList(response.bodyBytes);
+        }
+      } catch (_) {
+        // 该文件不存在或读取失败，继续尝试下一个扩展名。
+      }
+    }
+    return null;
   }
 
   static bool get proxyReady => LocalStreamProxy.instance.isRunning;

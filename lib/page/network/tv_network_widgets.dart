@@ -30,6 +30,7 @@ class TvActionButton extends StatelessWidget {
     this.selected = false,
     this.enabled = true,
     this.debugLabel,
+    this.focusNode,
     super.key,
   });
 
@@ -41,6 +42,10 @@ class TvActionButton extends StatelessWidget {
   final bool selected;
   final bool enabled;
   final String? debugLabel;
+
+  /// 传入外部 FocusNode 后可在数据加载完成 / 切换分区时精确 requestFocus，
+  /// 不依赖 autofocus（autofocus 只在控件首次创建时生效）。
+  final FocusNode? focusNode;
 
   @override
   Widget build(BuildContext context) {
@@ -54,6 +59,7 @@ class TvActionButton extends StatelessWidget {
           onTap: enabled ? onPressed : null,
           child: TvFocusHighlight(
             autofocus: autofocus,
+            focusNode: focusNode,
             debugLabel: debugLabel ?? 'tv-net-btn-$label',
             onActivate: enabled ? onPressed : null,
             builder: (context, focused) {
@@ -822,6 +828,9 @@ Future<T?> showTvMenu<T>({
       actions: <Widget>[
         TvActionButton(
           label: '关闭',
+          // 所有条目都 disabled 时 firstEnabled = -1，此时让「关闭」承担
+          // 初始焦点，保证弹窗内始终有且仅有一个可聚焦起点。
+          autofocus: firstEnabled < 0,
           onPressed: () => Navigator.of(dialogContext).pop(),
         ),
       ],

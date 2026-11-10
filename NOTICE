@@ -39,6 +39,13 @@ This product includes software developed by xiaobaimc:
 - v1.1.1 电视端调整：哔哩哔哩分区（推荐 / 搜索结果 / 历史播放 / 收藏）、更多层级与扫码登录深层入口；
   网盘进入后全屏文件列表与「上一步」返回；常见及老旧音频格式列表兼容、视频容器仅音频播放；
   焦点与软键盘可达性复核。
+- v1.1.2 十字方向键全链路复核：焦点收集排除非当前 route / Offstage / Visibility 隐藏节点与
+  `IndexedStack` 离屏页（`ExcludeFocus`），几何导航改为同行 / 同列优先并在严格方向无候选时放宽重试；
+  初始焦点按视觉位置选取；页签切换与网盘两态切换精确落焦；哔哩哔哩详情默认落在「播放全部」。
+- v1.1.2 推荐限定音乐区（音乐主分区 rid=3 及子分区 tid 白名单，三层端点均在音乐区内）；
+  B 站官方 CC 字幕与网盘同名外置字幕 / LRC 自动接入歌词数据区域，在线歌词作兜底。
+- v1.1.2 品牌图标重做：4 倍超采样 LANCZOS 抗锯齿、深蓝渐变 + 音符/星几何符号，
+  去除文字堆叠与描边拼贴；提供可复现生成器 `ci/branding/generate_branding.py`。
 
 Modifications to the upstream work (Android / Android TV port) by
 辰星 | Edwin 3J | HLmidi include: Android platform isolation, SAF/content:// library

@@ -10,6 +10,15 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 只出声，等价于静音视频）。
 enum BiliStreamMode { audio, video }
 
+/// 一条 B 站官方 CC 字幕（自带字幕）的时间轴文本。
+/// 独立于歌词模型，避免 services 层反向依赖 page 层。
+class BiliSubtitleLine {
+  const BiliSubtitleLine(this.start, this.text);
+
+  final Duration start;
+  final String text;
+}
+
 class BiliVideo {
   const BiliVideo({
     required this.bvid,
@@ -282,63 +291,86 @@ class BiliClient {
     return _decode(response.body);
   }
 
-  /// 首页推荐流。不同账号 / 网络环境下 rcmd 接口可能被风控，因此按顺序
-  /// 回退到「热门」和「全站排行榜」，保证分页主体默认一定有内容可展示。
+  /// B 站「音乐」主分区 rid。推荐固定只取该分区，不再使用全站 rcmd / 全站热门，
+  /// 否则会出现选举、数码、美食等与音乐无关的内容。
+  static const String _musicRid = '3';
+
+  /// 音乐主分区 (3) 及其所有子分区 tid。用于二次兜底过滤，
+  /// 防止个别接口返回的列表里混入其它分区稿件。
+  static const Set<int> _musicTids = <int>{
+    3, // 音乐（主分区）
+    15, // MV
+    28, // 原创音乐
+    29, // 音乐现场
+    30, // VOCALOID·UTAU
+    31, // 翻唱
+    59, // 演奏
+    130, // 音乐综合
+    193, // 音乐教学
+    194, // 乐评盘点
+    195, // 音乐资讯
+  };
+
+  /// 「推荐」只取音乐区。主用音乐区最新投稿（可分页），按序回退到音乐区
+  /// 排行榜与音乐区动态，三层都在音乐分区内，不会退化为全站内容。
   Future<List<BiliVideo>> recommend({int page = 1}) async {
     await _ensureIdentity();
+    // 1) 音乐区最新投稿：最贴合「推荐」语义，且支持翻页。
     try {
-      await _ensureWbi();
-      final params = <String, String>{
-        'ps': '20',
-        'fresh_type': '4',
-        'feed_version': 'V8',
-        'fresh_idx': page.toString(),
-        'fresh_idx_1h': page.toString(),
-        'brush': '0',
-        'web_location': '1430650',
-      };
       final result = await _getJson(
         Uri.https(
           'api.bilibili.com',
-          '/x/web-interface/wbi/index/top/feed/rcmd',
-          _sign(params),
+          '/x/web-interface/newlist',
+          <String, String>{
+            'rid': _musicRid,
+            'pn': page.toString(),
+            'ps': '20',
+          },
         ),
       );
       if (result['code'] == 0) {
         final data = result['data'];
-        final videos = _parseVideoList(data is Map ? data['item'] : null);
+        final videos = _parseVideoList(data is Map ? data['archives'] : null);
         if (videos.isNotEmpty) return videos;
       }
     } catch (_) {
       // 继续回退。
     }
-    try {
-      final result = await _getJson(
-        Uri.https(
-          'api.bilibili.com',
-          '/x/web-interface/popular',
-          <String, String>{'ps': '20', 'pn': page.toString()},
-        ),
-      );
-      if (result['code'] == 0) {
-        final data = result['data'];
-        final videos = _parseVideoList(data is Map ? data['list'] : null);
-        if (videos.isNotEmpty) return videos;
-      }
-    } catch (_) {
-      // 继续回退。
-    }
+    // 2) 音乐区排行榜（无分页概念，作为稳定兜底）。
     try {
       final result = await _getJson(
         Uri.https(
           'api.bilibili.com',
           '/x/web-interface/ranking/v2',
-          <String, String>{'rid': '0', 'type': 'all'},
+          <String, String>{'rid': _musicRid, 'type': 'all'},
         ),
       );
       if (result['code'] == 0) {
         final data = result['data'];
         final videos = _parseVideoList(data is Map ? data['list'] : null);
+        if (videos.isNotEmpty) return videos;
+      }
+    } catch (_) {
+      // 继续回退。
+    }
+    // 3) 音乐区动态（WBI 签名端点）。
+    try {
+      await _ensureWbi();
+      final params = <String, String>{
+        'rid': _musicRid,
+        'pn': page.toString(),
+        'ps': '20',
+      };
+      final result = await _getJson(
+        Uri.https(
+          'api.bilibili.com',
+          '/x/web-interface/wbi/dynamic/region',
+          _sign(params),
+        ),
+      );
+      if (result['code'] == 0) {
+        final data = result['data'];
+        final videos = _parseVideoList(data is Map ? data['archives'] : null);
         if (videos.isNotEmpty) return videos;
       }
     } catch (_) {
@@ -347,12 +379,20 @@ class BiliClient {
     return <BiliVideo>[];
   }
 
-  /// 把搜索 / 推荐 / 热门 / 排行榜的 JSON 列表统一成 [BiliVideo]。
+  /// 把推荐 / 排行榜 / 分区动态的 JSON 列表统一成 [BiliVideo]。
+  /// 带 tid 的条目必须是音乐分区，否则丢弃；不带 tid 的（排行榜）保留。
   List<BiliVideo> _parseVideoList(Object? raw) {
     if (raw is! List) return <BiliVideo>[];
     final videos = <BiliVideo>[];
     for (final item in raw) {
       if (item is! Map) continue;
+      final tidRaw = item['tid'];
+      if (tidRaw != null) {
+        final tid = tidRaw is num
+            ? tidRaw.toInt()
+            : int.tryParse(tidRaw.toString().trim());
+        if (tid != null && !_musicTids.contains(tid)) continue;
+      }
       final bvid = (item['bvid'] ?? '').toString();
       if (bvid.isEmpty) continue;
       final owner = item['owner'];
@@ -566,6 +606,95 @@ class BiliClient {
       if (first.isNotEmpty) return first;
     }
     return null;
+  }
+
+  // ===== B 站官方 CC 字幕（自带字幕 / 歌词） =====
+
+  /// 读取视频的官方字幕轨，优先中文字幕（含 AI 中文字幕）。
+  ///
+  /// `/x/player/v2` 返回 `data.subtitle.subtitles[]`，其中 `subtitle_url`
+  /// 指向一份 JSON：`{"body":[{"from":0.0,"to":2.0,"content":"..."}]}`。
+  /// 播放器是纯音频链路，无法解码视频内嵌字幕；把字幕按时间轴转成歌词行，
+  /// 就能在「歌词数据区域」自然显示带字幕视频的文本。
+  Future<List<BiliSubtitleLine>> fetchSubtitles({
+    required String bvid,
+    required int cid,
+  }) async {
+    await _ensureIdentity();
+    final params = <String, String>{
+      ..._videoParams(bvid),
+      'cid': cid.toString(),
+    };
+    Map<String, dynamic> result;
+    try {
+      result = await _getJson(
+        Uri.https('api.bilibili.com', '/x/player/v2', params),
+      );
+    } catch (_) {
+      return <BiliSubtitleLine>[];
+    }
+    if (result['code'] != 0) return <BiliSubtitleLine>[];
+    final data = result['data'];
+    final subtitle = data is Map ? data['subtitle'] : null;
+    final list = subtitle is Map ? subtitle['subtitles'] : null;
+    if (list is! List || list.isEmpty) return <BiliSubtitleLine>[];
+
+    Map<dynamic, dynamic>? picked;
+    for (final item in list) {
+      if (item is! Map) continue;
+      final lan = (item['lan'] ?? '').toString().toLowerCase();
+      if (lan.contains('zh') || lan.contains('cn') || lan.contains('ai-zh')) {
+        picked = item;
+        break;
+      }
+    }
+    if (picked == null) {
+      for (final item in list) {
+        if (item is Map) {
+          picked = item;
+          break;
+        }
+      }
+    }
+    if (picked == null) return <BiliSubtitleLine>[];
+    var url = (picked['subtitle_url'] ?? '').toString().trim();
+    if (url.isEmpty) return <BiliSubtitleLine>[];
+    if (url.startsWith('//')) url = 'https:$url';
+
+    try {
+      final response = await _client
+          .get(Uri.parse(url), headers: _apiHeaders())
+          .timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        return <BiliSubtitleLine>[];
+      }
+      final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+      final body = decoded is Map ? decoded['body'] : null;
+      if (body is! List) return <BiliSubtitleLine>[];
+      final lines = <BiliSubtitleLine>[];
+      for (final cue in body) {
+        if (cue is! Map) continue;
+        final text = (cue['content'] ?? '')
+            .toString()
+            .replaceAll(RegExp(r'<[^>]*>'), '')
+            .trim();
+        if (text.isEmpty) continue;
+        final from = cue['from'];
+        final seconds = from is num
+            ? from.toDouble()
+            : (double.tryParse(from?.toString().trim() ?? '') ?? 0.0);
+        lines.add(
+          BiliSubtitleLine(
+            Duration(milliseconds: (seconds * 1000).round()),
+            text,
+          ),
+        );
+      }
+      lines.sort((a, b) => a.start.compareTo(b.start));
+      return lines;
+    } catch (_) {
+      return <BiliSubtitleLine>[];
+    }
   }
 
   // ===== 二维码扫码登录 =====

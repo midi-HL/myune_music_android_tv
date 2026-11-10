@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import '../../tv/tv_focus_nav.dart';
 import '../../page/playlist/playlist_content_notifier.dart';
 import '../../page/playlist/playlist_models.dart';
 import '../../services/network/network_media_service.dart';
@@ -44,6 +45,17 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   void initState() {
     super.initState();
     _sources = RemoteSourceStore.instance.sources;
+  }
+
+  /// 两态切换后把焦点重新落到本页视觉上最靠前的入口控件
+  /// （源列表的「添加网络源」/ 浏览态的「上一步」），避免焦点停在已销毁的
+  /// 控件上。用页面类型限定候选，不持有固定 FocusNode，规避互斥 pane 切换时
+  /// 同一节点被重复 attach 的风险。
+  void _focusEntry() {
+    TvFocusController.instance.scheduleFocusWhere(
+      (context) =>
+          context.findAncestorWidgetOfExactType<NetworkSourcesView>() != null,
+    );
   }
 
   void _refreshSources() {
@@ -110,6 +122,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       _history.clear();
     });
     _refreshSources();
+    _focusEntry();
   }
 
   RemoteSource? _selectedSource;
@@ -122,6 +135,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       _currentPath = NetworkMediaService.rootOf(source);
       _artworkUrl = null;
     });
+    _focusEntry();
     await _loadDirectory();
   }
 
@@ -164,6 +178,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
         _artworkUrl = null;
         _error = null;
       });
+      _focusEntry();
       return;
     }
     setState(() => _currentPath = _history.removeLast());
@@ -435,7 +450,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
                   label: '上一步',
                   value: _history.isEmpty ? '返回源列表' : '上级目录',
                   icon: Icons.arrow_upward,
-                  onPressed: _goUp,
+                      onPressed: _goUp,
                 ),
               ),
               const SizedBox(width: 12),

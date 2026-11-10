@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -43,7 +44,15 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
     // 这里必须明确放行，返回 null 会被 Shortcuts 当成 handled 吞掉按键。
     if (_isEditableFocus(node)) return KeyEventResult.ignored;
 
-    TvFocusController.instance.moveFocus(intent.direction, node);
+    // 严格几何方向优先；若该方向上确实没有同行 / 同列候选，再放宽对齐
+    // 约束重试一次（方向仍然严格不变），避免焦点卡在死角里按不动。
+    if (!TvFocusController.instance.moveFocus(intent.direction, node)) {
+      TvFocusController.instance.moveFocus(
+        intent.direction,
+        node,
+        relaxed: true,
+      );
+    }
     return KeyEventResult.handled;
   }
 
@@ -158,23 +167,37 @@ class TvFocusController {
     _pickLeaf(candidates).requestFocus();
   }
 
-  // 选面积最小的可聚焦控件，避免焦点落到整页容器上导致「整个界面被框住」。
+  // 初始 / 恢复焦点：按「视觉上从上到下、从左到右」选第一个叶子控件。
+  // 旧实现选全局面积最小的控件，实际会落到某个小图标（星标 / 翻页箭头）
+  // 上，与界面主次不符；同时整页级容器要先剔除，避免「整个界面被框住」。
   static FocusNode _pickLeaf(List<_FocusCandidate> candidates) {
-    _FocusCandidate? best;
-    double bestArea = double.infinity;
-    for (final candidate in candidates) {
-      final area = candidate.rect.width * candidate.rect.height;
-      if (area <= 0) continue;
-      if (area < bestArea) {
-        bestArea = area;
-        best = candidate;
+    final screen = screenSize();
+    final usable = candidates.where((c) {
+      if (c.rect.width <= 0 || c.rect.height <= 0) return false;
+      if (c.rect.width >= screen.width * 0.92 &&
+          c.rect.height >= screen.height * 0.88) {
+        return false;
       }
-    }
-    return (best ?? candidates.first).node;
+      return true;
+    }).toList();
+    if (usable.isEmpty) return candidates.first.node;
+    usable.sort((a, b) {
+      const double rowTolerance = 12.0;
+      final rowDiff = (a.rect.top - b.rect.top).abs();
+      if (rowDiff > rowTolerance) return a.rect.top.compareTo(b.rect.top);
+      return a.rect.left.compareTo(b.rect.left);
+    });
+    return usable.first.node;
   }
 
   // 严格几何方向导航：只看目标方向那一侧的空间，不做阅读顺序兜底。
-  bool moveFocus(TraversalDirection direction, FocusNode current) {
+  // [relaxed] 为 true 时取消「同行 / 同列」加权（严格方向仍保留），
+  // 用于严格模式找不到任何候选时的第二次兜底，避免焦点卡死。
+  bool moveFocus(
+    TraversalDirection direction,
+    FocusNode current, {
+    bool relaxed = false,
+  }) {
     final currentRect = rectOf(current);
     if (currentRect == null) return false;
 
@@ -247,8 +270,30 @@ class TvFocusController {
           break;
       }
 
-      // 主方向距离为主，副方向偏移作为惩罚，避免斜着跳到很远的对角控件。
-      final score = primary + secondary * 2.0;
+      // 「同一视觉行 / 同一视觉列」优先：
+      // 左右移动时，候选与当前控件在垂直方向要有实质重叠；上下移动时，
+      // 水平方向要有实质重叠。同行 / 同列的相邻控件只用中心点偏移做轻度
+      // 惩罚，跨行 / 跨列的候选额外加权并加固定惩罚，避免从「播放全部」
+      // 向下斜跳到旁侧视频列表、或从工具栏按右跳到另一个页签的控件。
+      // 这是「焦点移动符合界面视觉位置、相邻栏目直觉关系」的核心约束。
+      final bool horizontal =
+          direction == TraversalDirection.left ||
+          direction == TraversalDirection.right;
+      final double overlap = horizontal
+          ? math.min(currentRect.bottom, candidate.rect.bottom) -
+              math.max(currentRect.top, candidate.rect.top)
+          : math.min(currentRect.right, candidate.rect.right) -
+              math.max(currentRect.left, candidate.rect.left);
+      final double axisExtent = horizontal
+          ? math.min(currentRect.height, candidate.rect.height)
+          : math.min(currentRect.width, candidate.rect.width);
+      final bool aligned =
+          axisExtent > 0 && overlap >= axisExtent * 0.5;
+      final double secondaryWeight =
+          relaxed ? 2.0 : (aligned ? 1.2 : 3.5);
+      final double crossPenalty =
+          relaxed || aligned ? 0.0 : axisExtent;
+      final score = primary + secondary * secondaryWeight + crossPenalty;
       if (score < bestScore) {
         bestScore = score;
         best = candidate;
@@ -330,6 +375,13 @@ class TvFocusController {
     int depth,
   ) {
     if (depth > 24) return;
+    // ExcludeFocus（以及 Focus(descendantsAreFocusable:false)）会让整棵子树
+    // 退出焦点链。IndexedStack 的离屏子页虽然仍参与 layout，RenderBox 与
+    // 可见页坐标完全重叠；若不排除，几何导航会把离屏页的控件也当成候选，
+    // 表现为「按右跳到另一个页签」「栏目顺序混乱」。
+    if (!node.descendantsAreFocusable || !node.descendantsAreTraversable) {
+      return;
+    }
     for (final child in node.children) {
       if (child is FocusScopeNode) {
         _collect(child, out, depth + 1);
@@ -346,6 +398,20 @@ class TvFocusController {
   static Rect? rectOf(FocusNode node) {
     final context = node.context;
     if (context == null || !context.mounted) return null;
+
+    // 全局可见性判定：焦点树里会残留大量「看得到坐标、看不到界面」的节点。
+    // 若不过滤，几何导航会把它们当成候选，表现为跨页乱跳 / 顺序混乱。
+    // 1) Navigator 保活的旧页面、页面切换动画期间的离屏 route：
+    //    只有当前 route 的节点才是真实可见的控件（对话框 / 抽屉本身是
+    //    当前 route，正常保留；主界面在弹窗期间由 _activeModalLayer 排除）。
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) return null;
+    // 2) Offstage / Visibility(visible:false) 的整棵子树。
+    final offstage = context.findAncestorWidgetOfExactType<Offstage>();
+    if (offstage != null && offstage.offstage) return null;
+    final visibility = context.findAncestorWidgetOfExactType<Visibility>();
+    if (visibility != null && !visibility.visible) return null;
+
     final object = context.findRenderObject();
     if (object is! RenderBox || !object.attached || !object.hasSize) {
       return null;
@@ -481,6 +547,7 @@ class TvFocusHighlight extends StatefulWidget {
     this.onActivate,
     this.autofocus = false,
     this.debugLabel,
+    this.focusNode,
     super.key,
   }) : assert(builder != null || child != null,
             'TvFocusHighlight needs either builder or child');
@@ -494,17 +561,23 @@ class TvFocusHighlight extends StatefulWidget {
   final bool autofocus;
   final String? debugLabel;
 
+  /// 外部传入时由调用方持有并在 dispose 中释放，用于数据加载完成后
+  /// 精确 requestFocus（autofocus 只在控件首次创建时生效）。
+  final FocusNode? focusNode;
+
   @override
   State<TvFocusHighlight> createState() => _TvFocusHighlightState();
 }
 
 class _TvFocusHighlightState extends State<TvFocusHighlight> {
   late final FocusNode _node;
+  late final bool _ownsNode;
 
   @override
   void initState() {
     super.initState();
-    _node = FocusNode(debugLabel: widget.debugLabel);
+    _ownsNode = widget.focusNode == null;
+    _node = widget.focusNode ?? FocusNode(debugLabel: widget.debugLabel);
     _node.addListener(_onFocusChange);
   }
 
@@ -515,7 +588,7 @@ class _TvFocusHighlightState extends State<TvFocusHighlight> {
   @override
   void dispose() {
     _node.removeListener(_onFocusChange);
-    _node.dispose();
+    if (_ownsNode) _node.dispose();
     super.dispose();
   }
 

@@ -2,7 +2,7 @@
 
 > 本文件是回档后的完整交接说明。代码基线按用户更正后的要求回到 2026-11-06 07:13 的 `558a71f`（11 点左右仓库里的版本、也是 `a28f2c9` 的前一个版本），仅额外接入 64 位 / 32 位双 ABI 构建；12:13 之后所有 UI、缩放、横屏、密度、原生视口 DPI、挖孔主题改动均已撤销。
 >
-> **当前状态（2026-11-09，v1.1.1）：以下第 1–12 节是 2026-11-06 回档阶段的「历史阶段记录」，仅作为审计轨迹保留，不代表当前实现。** 其中关于「debug 签名」「仓库保持 private」「四个 secrets 可选」「两 ABI」等描述均已过期：仓库 `midi-HL/myune_music_android_tv` 已转 public，首发 `v1.0.0` 后 `v1.1.0` 已切换为**固定 release 签名**、CI 三 ABI、新增网络媒体（WebDAV / FTP / 哔哩哔哩）；`v1.1.1` 为网络媒体播放修复与电视端 UI 重构版本。各轮演进以第 13–19 节为准，尤其第 19 节为最新状态；历史章节中的旧结论不要直接套用到当前代码。
+> **当前状态（2026-11-10，v1.1.2）：以下第 1–12 节是 2026-11-06 回档阶段的「历史阶段记录」，仅作为审计轨迹保留，不代表当前实现。** 其中关于「debug 签名」「仓库保持 private」「四个 secrets 可选」「两 ABI」等描述均已过期：仓库 `midi-HL/myune_music_android_tv` 已转 public，首发 `v1.0.0` 后 `v1.1.0` 已切换为**固定 release 签名**、CI 三 ABI、新增网络媒体（WebDAV / FTP / 哔哩哔哩）；`v1.1.1` 为网络媒体播放修复与电视端 UI 重构版本；`v1.1.2` 为十字方向键全链路复核、推荐音乐区限定、字幕获取与品牌图标重做版本。各轮演进以第 13–20 节为准，尤其第 20 节为最新状态；历史章节中的旧结论不要直接套用到当前代码。
 
 ## 1. 项目是什么
 
@@ -694,3 +694,81 @@ AAC/ALAC、Ogg/Opus/Speex、WMA/ASF、模块音乐、MIDI、AMR/RealAudio、AC3/
 
 - 本轮为 `603b86c` 之后的提交，tag `v1.1.1`。回滚：`git revert <本轮提交>`，或 checkout `v1.1.0`；
   Release 与 APK 属远端状态，需单独删除。签名证书与 `v1.1.0` 相同，可直接覆盖安装或回退安装。
+
+## 20. 十字方向键全链路复核、音乐区推荐、字幕与品牌图标（2026-11-10，v1.1.2）
+
+用户以真机截图提出五类问题，并要求「不是指出哪里改哪里，而是把所有操作逻辑完整检查一遍」。
+本轮因此从焦点算法层做系统性复核，而非逐点补丁。
+
+### 20.1 焦点系统根因与修复（`lib/tv/tv_focus_nav.dart`）
+
+- **离屏控件污染候选集**：`IndexedStack` 与 `Navigator` 都会把非激活 / 保活页面留在
+  widget 树里，其 `RenderBox` 与可见页坐标完全重叠。原 `rectOf()` 只检查 `hasSize`，
+  于是几何导航把「看不见但坐标相同」的控件当成候选，表现为进入哔哩哔哩按右跳到
+  网络硬盘栏目、按左跳到搜索结果、栏目顺序混乱。
+  修复：① `rectOf()` 排除非当前 `ModalRoute`、`Offstage(offstage:true)`、
+  `Visibility(visible:false)`；② `_collect()` 遇 `descendantsAreFocusable/Traversable=false`
+  的节点直接剪枝；③ `NetworkMediaPage` 用 `ExcludeFocus(excluding: _tab != n)` 包住两个页签。
+- **斜跳**：原评分 `primary + secondary*2` 只看中心点距离，从「播放全部」向下会斜跳到
+  旁侧视频列表。修复：按方向计算两个 rect 在副轴上的重叠量，`aligned`（重叠 ≥ 半个轴长）
+  时惩罚 1.2 倍，未对齐时 3.5 倍并叠加轴长惩罚，保证同行 / 同列相邻控件优先。
+- **死角卡住**：严格方向无候选时原实现直接吞键。修复：`moveFocus(..., relaxed:true)`
+  二次重试，取消对齐加权但方向仍严格不变。
+- **初始焦点错位**：`_pickLeaf` 原选全屏面积最小控件（常落到星标 / 翻页小图标）。
+  修复：先剔除整页容器，再按 `top` 分行（`±12px` 容差）、行内按 `left` 排序取第一个。
+
+### 20.2 入口可达性与详情页（`lib/page/network/`）
+
+- `NetworkMediaPage._switchTab()` 与 `NetworkSourcesView._focusEntry()` 统一走
+  `TvFocusController.scheduleFocusWhere()`，按「页面类型限定候选 + 视觉位置取首个叶子」
+  重新落焦（网盘「添加网络源」/「上一步」，B 站「搜索」），不持有跨互斥 pane 的固定
+  `FocusNode`，规避同一节点被两个互斥控件先后 attach 的重复挂载风险。
+- `TvFocusHighlight` / `TvActionButton` 新增可选 `focusNode`；详情页「播放全部」持有
+  唯一的 `_playAllFocusNode`（只挂一个控件），`BilibiliView._openDetail()` 成功后等两帧
+  `postFrame` 落焦，向下进入分 P 选择区。
+- `showTvMenu` 全条目禁用时让「关闭」承担初始焦点，保证弹窗内始终有唯一焦点起点。
+- 完整复核覆盖：顶部两个页签、工具栏（搜索 / 打开 BV 号 / 更多 / 上一页 / 下一页）、
+  第二排分区栏（推荐 / 搜索结果 / 历史播放 / 收藏）、视频列表与星标、详情面板
+  （播放全部 / 收藏 / 加入队列 / 分 P 列表）、收藏与历史列表、网盘源列表与文件浏览、
+  所有弹窗与软键盘输入、左侧导航栏、底部播放栏、进度条 / 设置滑块的守卫。
+
+### 20.3 推荐限定音乐区（`lib/services/network/bilibili_client.dart`）
+
+- 原 `recommend()` 使用全站 rcmd / 全站热门 / `rid=0` 排行榜，真机出现「选举」「MacBook Pro」
+  「美食」等非音乐内容。改为音乐主分区 `rid=3`：音乐区最新投稿 `newlist`（可分页）→
+  音乐区排行榜 `ranking/v2?rid=3` → 音乐区动态 `wbi/dynamic/region?rid=3`。
+- `_parseVideoList()` 增加 `_musicTids` 白名单（3 / 15 / 28 / 29 / 30 / 31 / 59 / 130 /
+  193 / 194 / 195），带 `tid` 且不属于音乐分区的条目直接丢弃。
+
+### 20.4 字幕 / 歌词自动获取（`lib/services/network/` + `lib/lyrics/lyrics_handler.dart`）
+
+- 真机播放带「中文字幕」的 B 站视频时歌词区显示「无歌词数据」：原网络媒体分支直接
+  跳过全部歌词来源，只用在线歌词（标题含「【中文字幕】」时匹配不到）。
+- `BiliClient.fetchSubtitles()`：`/x/player/v2` 取 `data.subtitle.subtitles[]`，优先中文
+  （含 AI 中文）字幕，`subtitle_url` 补 `https:` 后下载 JSON，解析 `body[].from/content`
+  成 `BiliSubtitleLine` 并按时间排序。
+- `NetworkMediaService.sidecarLyricsFor()`：网盘音频同目录换扩展名尝试
+  `.lrc/.srt/.ass/.ssa/.vtt`，经本机代理按需读取（8 秒超时、512 KB 上限）。
+- `LyricsHandler._loadNetworkLyricsPipeline()` 按「B 站 CC 字幕 → 网盘同名外置字幕
+  （LRC 优先，SRT/VTT 按 `-->` 时间轴解析）→ 在线歌词兜底」顺序加载，每步校验
+  当前歌曲未被切走，避免把上一首字幕贴到新歌上。
+
+### 20.5 品牌图标重做（`ci/branding/`）
+
+- 旧 TV banner 是「青色描边圆角框 + 圆形音符 + 星 + 中文 + 英文 + 下划线」的拼贴。
+  参考同屏其它应用图标（纯色 / 渐变圆角底 + 单一简洁几何符号）重做：
+  深靛蓝→蓝渐变底、两处低强度青 / 紫光晕、连贯的「倾斜符头 + 圆角符干 + 暖金四角星」
+  几何符号（青绿→青蓝渐变）、底部一条极淡音波弧线；launcher 完全无文字，
+  TV banner 仅保留克制的「星音 / STARNOTE」。
+- `generate_branding.py` 用 4 倍超采样绘制 + `Image.LANCZOS` 缩小，所有边缘走光栅抗锯齿，
+  消除锯齿与 SVG 拼接感；产出 5 个密度的 `ic_launcher` / `ic_launcher_round` 与
+  320×180 `tv_banner.png`，可一键复现。
+
+### 20.6 复核与回滚
+
+- 本机静态复核 `tv_apks/_review_v112.py`：**222/222 ALL PASS**（9 个改动 Dart 文件的
+  词法括号 / 字符串平衡、30+ 相对 import 解析、新增 API 契约、图标 PNG 尺寸 / RGBA /
+  半透明边缘抗锯齿证据、敏感信息扫描、`git diff --check`）。
+- **本机没有 Flutter / Dart CLI**，最终编译与产物校验仍依赖 CI `flutter build apk --release`（三 ABI）。
+- 本轮为 `fb858d7` 之后的提交，tag `v1.1.2`。回滚：`git revert <本轮提交>`，或 checkout `v1.1.1`；
+  Release 与 APK 属远端状态，需单独删除。签名证书与 `v1.1.0` / `v1.1.1` 相同，可直接覆盖安装。
