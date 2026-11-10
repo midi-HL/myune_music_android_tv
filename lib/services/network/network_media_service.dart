@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import '../../page/playlist/playlist_models.dart';
+import 'bili_library.dart';
 import 'bilibili_client.dart';
 import 'ftp_client.dart';
 import 'local_stream_proxy.dart';
@@ -20,6 +22,7 @@ class NetworkMediaService {
   static Future<void> initialize() async {
     await RemoteSourceStore.instance.load();
     await BiliAuthStore.instance.load();
+    await BiliLibraryStore.instance.load();
     try {
       await LocalStreamProxy.instance.start();
     } catch (_) {
@@ -46,32 +49,113 @@ class NetworkMediaService {
         : source.ftpRoot;
   }
 
+  /// 在当前目录里找常见的专辑封面文件，返回一个可通过本机代理读取的 URL。
+  ///
+  /// 封面同样走「按需拉流、不落盘」：URL 编码的是网盘上的图片路径，
+  /// 代理会补上 WebDAV / FTP 鉴权。`RemoteMediaRegistry.artworkFor()` 会在
+  /// 需要显示封面时下载它，播放列表与媒体会话都能拿到 artwork。
+  static String? directoryArtworkUrl(
+    RemoteSource source,
+    List<RemoteEntry> entries,
+  ) {
+    const candidates = <String>[
+      'cover.jpg',
+      'cover.jpeg',
+      'cover.png',
+      'folder.jpg',
+      'folder.jpeg',
+      'folder.png',
+      'front.jpg',
+      'front.png',
+      'albumart.jpg',
+      'albumart.png',
+      'thumb.jpg',
+    ];
+    RemoteEntry? cover;
+    for (final name in candidates) {
+      for (final entry in entries) {
+        if (!entry.isDirectory && entry.name.toLowerCase() == name) {
+          cover = entry;
+          break;
+        }
+      }
+      if (cover != null) break;
+    }
+    if (cover == null) return null;
+    try {
+      return LocalStreamProxy.instance.urlForNas(
+        source.id,
+        cover.path,
+        title: cover.name,
+        proto: source.type == RemoteSourceType.ftp ? 'ftp' : 'webdav',
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 常见命名 `歌手 - 标题.mp3` 自动拆出歌手，避免网盘音乐全部显示「未知歌手」。
+  /// 返回 `[title, artist]`。
+  static List<String> splitTitleArtist(String name) {
+    final base = name.contains('.')
+        ? name.substring(0, name.lastIndexOf('.'))
+        : name;
+    final match = RegExp(r'\s+[-–—~]\s+').firstMatch(base);
+    if (match != null) {
+      final artist = base.substring(0, match.start).trim();
+      final title = base.substring(match.end).trim();
+      if (artist.isNotEmpty && title.isNotEmpty) {
+        return <String>[title, artist];
+      }
+    }
+    return <String>[base, '未知歌手'];
+  }
+
   /// 把一个网络硬盘音频文件构造成 Song，并登记元数据。
   static Song nasSong({
     required RemoteSource source,
     required RemoteEntry entry,
+    String? artist,
+    String? album,
+    int? durationSeconds,
+    String? artworkUrl,
+    Uint8List? albumArt,
   }) {
-    final name = entry.name;
-    final title = name.contains('.')
-        ? name.substring(0, name.lastIndexOf('.'))
-        : name;
+    final parsed = splitTitleArtist(entry.name);
+    final title = parsed[0];
+    final resolvedArtist =
+        (artist == null || artist.trim().isEmpty) ? parsed[1] : artist.trim();
+    final resolvedAlbum =
+        (album == null || album.trim().isEmpty) ? source.name : album.trim();
     final url = LocalStreamProxy.instance.urlForNas(
       source.id,
       entry.path,
       title: title,
-      album: source.name,
+      artist: resolvedArtist,
+      album: resolvedAlbum,
+      durationSeconds: durationSeconds,
+      artworkUrl: artworkUrl,
+      proto: source.type == RemoteSourceType.ftp ? 'ftp' : 'webdav',
+      mediaId: 'nas:${source.id}:${entry.path.hashCode}',
     );
     final song = Song(
       title: title,
-      artist: '未知歌手',
-      album: source.name,
+      artist: resolvedArtist,
+      album: resolvedAlbum,
       filePath: url,
+      albumArt: albumArt,
+      duration: (durationSeconds != null && durationSeconds > 0)
+          ? Duration(seconds: durationSeconds)
+          : null,
     );
     RemoteMediaRegistry.register(url, song);
+    if (albumArt != null && albumArt.isNotEmpty) {
+      RemoteMediaRegistry.registerArtwork(url, albumArt);
+    }
     return song;
   }
 
-  /// 把一个 B 站分 P 构造成 Song，并登记元数据。
+  /// 把一个 B 站分 P 构造成 Song，并登记元数据（含封面 URL）。
   static Song biliSong({
     required String bvid,
     required int cid,
@@ -79,6 +163,8 @@ class NetworkMediaService {
     required String author,
     required BiliStreamMode mode,
     int? durationSeconds,
+    String? artworkUrl,
+    String? mediaId,
   }) {
     final url = LocalStreamProxy.instance.urlForBili(
       bvid,
@@ -88,6 +174,8 @@ class NetworkMediaService {
       artist: author.isEmpty ? '哔哩哔哩' : author,
       album: '哔哩哔哩 · $bvid',
       durationSeconds: durationSeconds,
+      artworkUrl: artworkUrl,
+      mediaId: mediaId,
     );
     final song = Song(
       title: title,

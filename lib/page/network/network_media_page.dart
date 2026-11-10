@@ -18,19 +18,18 @@ class _NetworkMediaPageState extends State<NetworkMediaPage> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 6),
           child: Row(
             children: <Widget>[
               Text(
                 '网络媒体',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
-              const SizedBox(width: 24),
+              const SizedBox(width: 20),
               SizedBox(
                 width: 190,
                 child: TvActionButton(
@@ -49,14 +48,6 @@ class _NetworkMediaPageState extends State<NetworkMediaPage> {
                   icon: Icons.smart_display_outlined,
                   selected: _tab == 1,
                   onPressed: () => setState(() => _tab = 1),
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '方向键移动 · OK 确认 · 返回键退出输入',
-                style: TextStyle(
-                  fontSize: 11,
-                  color: scheme.onSurfaceVariant,
                 ),
               ),
             ],

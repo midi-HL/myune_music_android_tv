@@ -89,10 +89,13 @@ class FtpClient {
     final session = await _connect();
     try {
       final total = await session.control.size(remotePath);
+      // FTP 协议要求 REST 之后紧跟 RETR。先建立数据连接（PASV），再 REST，
+      // 最后 RETR；旧实现把 PASV 夹在 REST 和 RETR 之间，部分 NAS 会因此
+      // 重置重启点，Range 请求实际从 0 开始，mpv 拖动进度后报 loading failed。
+      final data = await session.openDataConnection();
       if (start != null && start > 0) {
         await session.control.send('REST $start');
       }
-      final data = await session.openDataConnection();
       await session.control.send('RETR $remotePath');
 
       final servedStart = start ?? 0;
@@ -224,9 +227,16 @@ class _FtpSession {
     if (match == null) {
       throw Exception('FTP 服务器不支持 PASV：${reply.split('\n').first}');
     }
-    final host =
+    final pasvHost =
         '${match.group(1)}.${match.group(2)}.${match.group(3)}.${match.group(4)}';
     final port = int.parse(match.group(5)!) * 256 + int.parse(match.group(6)!);
+    final controlHost = _controlSocket.remoteAddress.address;
+    // NAT 后的 NAS 常在 PASV 里返回不可达的内网 / 回环地址。直接改用控制
+    // 连接的对端地址（端口仍用 PASV 给出的），比「先连失败再回退」更快、
+    // 也不会白等 15 秒超时。
+    final host = (pasvHost != controlHost && _isUnroutable(pasvHost))
+        ? controlHost
+        : pasvHost;
     Socket data;
     try {
       data = await Socket.connect(
@@ -235,15 +245,25 @@ class _FtpSession {
         timeout: const Duration(seconds: 15),
       );
     } catch (_) {
-      // NAT 后的 NAS 常在 PASV 里返回内网地址，回退到控制连接的对端地址。
+      // 仍失败时再试控制连接对端，兼容 PASV 返回了另一个同网段地址的情况。
       data = await Socket.connect(
-        _controlSocket.remoteAddress.address,
+        controlHost,
         port,
         timeout: const Duration(seconds: 15),
       );
     }
     _dataSocket = data;
     return data;
+  }
+
+  bool _isUnroutable(String address) {
+    if (address == '0.0.0.0' || address == '127.0.0.1' || address == '::1') {
+      return true;
+    }
+    return address.startsWith('10.') ||
+        address.startsWith('192.168.') ||
+        RegExp(r'^172\.(1[6-9]|2\d|3[01])\.').hasMatch(address) ||
+        address.startsWith('169.254.');
   }
 
   /// 数据传输结束后读取 226 完成响应，避免它留在缓冲区干扰下一次命令。

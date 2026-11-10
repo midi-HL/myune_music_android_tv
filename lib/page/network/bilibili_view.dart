@@ -4,16 +4,38 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../page/playlist/playlist_content_notifier.dart';
 import '../../page/playlist/playlist_models.dart';
+import '../../services/network/bili_library.dart';
 import '../../services/network/bilibili_client.dart';
 import '../../services/network/network_media_service.dart';
+import '../../services/network/remote_media_registry.dart';
 import 'tv_network_widgets.dart';
+
+/// 「哔哩哔哩」主体分区。顶部只有一行工具条，主体按分区展示内容。
+enum _BiliSection { recommend, search, history, favorites }
+
+extension _BiliSectionLabel on _BiliSection {
+  String get label => switch (this) {
+        _BiliSection.recommend => '推荐',
+        _BiliSection.search => '搜索结果',
+        _BiliSection.history => '历史播放',
+        _BiliSection.favorites => '收藏',
+      };
+
+  IconData get icon => switch (this) {
+        _BiliSection.recommend => Icons.auto_awesome_outlined,
+        _BiliSection.search => Icons.search,
+        _BiliSection.history => Icons.history,
+        _BiliSection.favorites => Icons.star_border,
+      };
+}
 
 /// 「哔哩哔哩」标签页。
 ///
-/// 参考 BiliMusic-Desktop 的功能范围与交互：关键词搜索 + 分页、BV 号/链接解析、
-/// 分 P 展开、单独播放与整组加入队列、重启后仍可播放的队列（URL 自带元数据）、
-/// 流式播放（本机代理 + Range）、扫码登录、搜索历史、音频/视频流切换。
-/// 身份模型沿用 `bilibili:{bvid}:{cid}`。
+/// 顶部固定区域压缩为「一行工具条 + 一行分区选项栏」：
+///   * 工具条只保留 搜索 / 打开 BV 号 / 更多 与紧凑的 上一页 / 下一页；
+///   * 主体默认展示推荐；分区选项栏提供 推荐 / 搜索结果 / 历史播放 / 收藏；
+///   * 次要功能（搜索历史、账号与登录、流类型、清空历史）收进「更多」，
+///     扫码登录再往下一层，避免功能平铺占掉内容区。
 class BilibiliView extends StatefulWidget {
   const BilibiliView({super.key});
 
@@ -25,8 +47,10 @@ class BilibiliViewState extends State<BilibiliView>
     with AutomaticKeepAliveClientMixin {
   static const String _historyKey = 'starnote.bilibili.search.history.v1';
 
+  _BiliSection _section = _BiliSection.recommend;
   String _keyword = '';
   int _page = 1;
+  List<BiliVideo> _recommend = <BiliVideo>[];
   List<BiliVideo> _results = <BiliVideo>[];
   bool _loading = false;
   String? _error;
@@ -35,9 +59,10 @@ class BilibiliViewState extends State<BilibiliView>
   bool _detailLoading = false;
   String? _detailError;
   BiliStreamMode _mode = BiliStreamMode.audio;
-  bool _enqueueMode = false;
   bool _loggedIn = false;
-  List<String> _history = <String>[];
+  List<String> _searchHistory = <String>[];
+  List<Song> _favorites = <Song>[];
+  List<Song> _history = <Song>[];
 
   @override
   bool get wantKeepAlive => true;
@@ -46,24 +71,40 @@ class BilibiliViewState extends State<BilibiliView>
   void initState() {
     super.initState();
     _loggedIn = BiliAuthStore.instance.isLoggedIn;
-    _loadHistory();
+    _loadSearchHistory();
+    _loadLibrary();
+    _loadRecommend();
   }
 
-  Future<void> _loadHistory() async {
+  Future<void> _loadSearchHistory() async {
     final prefs = await SharedPreferences.getInstance();
     final list = prefs.getStringList(_historyKey) ?? const <String>[];
-    if (mounted) setState(() => _history = list);
+    if (mounted) setState(() => _searchHistory = list);
   }
 
   Future<void> _remember(String keyword) async {
     final trimmed = keyword.trim();
     if (trimmed.isEmpty) return;
     final next = <String>[trimmed]
-      ..addAll(_history.where((h) => h != trimmed).take(7));
-    setState(() => _history = next);
+      ..addAll(_searchHistory.where((h) => h != trimmed).take(7));
+    if (mounted) setState(() => _searchHistory = next);
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_historyKey, next);
   }
+
+  Future<void> _loadLibrary() async {
+    await BiliLibraryStore.instance.load();
+    if (!mounted) return;
+    setState(() {
+      _favorites = BiliLibraryStore.instance.favorites;
+      _history = BiliLibraryStore.instance.history;
+    });
+  }
+
+  bool get _canPage =>
+      _section == _BiliSection.recommend || _section == _BiliSection.search;
+
+  // ===== 顶部工具条 =====
 
   Future<void> _promptSearch() async {
     final value = await showTvTextInput(
@@ -80,6 +121,9 @@ class BilibiliViewState extends State<BilibiliView>
     setState(() {
       _keyword = keyword;
       _page = 1;
+      _section = _BiliSection.search;
+      _selected = null;
+      _detail = null;
     });
     await _search();
   }
@@ -109,6 +153,185 @@ class BilibiliViewState extends State<BilibiliView>
     );
   }
 
+  Future<void> _openMore() async {
+    final choice = await showTvMenu<String>(
+      context: context,
+      title: '更多',
+      items: <TvMenuItem<String>>[
+        TvMenuItem<String>(
+          value: 'searchHistory',
+          label: '搜索历史',
+          valueText: '${_searchHistory.length} 条',
+          icon: Icons.history,
+        ),
+        TvMenuItem<String>(
+          value: 'account',
+          label: '账号与登录',
+          valueText: _loggedIn ? '已登录' : '未登录',
+          icon: Icons.person_outline,
+        ),
+        TvMenuItem<String>(
+          value: 'mode',
+          label: '流类型',
+          valueText: _mode == BiliStreamMode.audio ? '音频流' : '视频流',
+          icon: Icons.audiotrack_outlined,
+        ),
+        TvMenuItem<String>(
+          value: 'clearHistory',
+          label: '清空历史播放',
+          icon: Icons.delete_sweep_outlined,
+        ),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    switch (choice) {
+      case 'searchHistory':
+        await _showSearchHistory();
+        break;
+      case 'account':
+        await _openAccount();
+        break;
+      case 'mode':
+        await _chooseMode();
+        break;
+      case 'clearHistory':
+        await BiliLibraryStore.instance.clearHistory();
+        await _loadLibrary();
+        await showTvAlert(context, '已清空历史播放');
+        break;
+    }
+  }
+
+  /// 扫码登录放在「更多 → 账号与登录 → 扫码登录」这一更深层，
+  /// 登录状态在「更多」与账号页都显式显示。
+  Future<void> _openAccount() async {
+    final choice = await showTvMenu<String>(
+      context: context,
+      title: '账号与登录',
+      items: <TvMenuItem<String>>[
+        TvMenuItem<String>(
+          value: 'status',
+          label: '登录状态',
+          valueText: _loggedIn ? '已登录' : '未登录',
+          icon: Icons.info_outline,
+          enabled: false,
+        ),
+        const TvMenuItem<String>(
+          value: 'qr',
+          label: '扫码登录',
+          icon: Icons.qr_code_2,
+        ),
+        if (_loggedIn)
+          const TvMenuItem<String>(
+            value: 'logout',
+            label: '退出登录',
+            icon: Icons.logout,
+          ),
+      ],
+    );
+    if (!mounted || choice == null) return;
+    if (choice == 'qr') {
+      final changed = await showTvQrLogin(context: context);
+      if (mounted) {
+        setState(() {
+          _loggedIn = BiliAuthStore.instance.isLoggedIn || changed;
+        });
+      }
+    } else if (choice == 'logout') {
+      await BiliAuthStore.instance.clear();
+      if (mounted) setState(() => _loggedIn = false);
+      await showTvAlert(context, '已退出哔哩哔哩登录');
+    }
+  }
+
+  Future<void> _chooseMode() async {
+    final picked = await showTvMenu<BiliStreamMode>(
+      context: context,
+      title: '流类型',
+      items: <TvMenuItem<BiliStreamMode>>[
+        const TvMenuItem<BiliStreamMode>(
+          value: BiliStreamMode.audio,
+          label: '音频流',
+          valueText: '更省流量，推荐',
+          icon: Icons.audiotrack_outlined,
+        ),
+        const TvMenuItem<BiliStreamMode>(
+          value: BiliStreamMode.video,
+          label: '视频流',
+          valueText: '仅音频播放',
+          icon: Icons.smart_display_outlined,
+        ),
+      ],
+    );
+    if (picked != null && mounted) setState(() => _mode = picked);
+  }
+
+  Future<void> _showSearchHistory() async {
+    if (_searchHistory.isEmpty) {
+      await showTvAlert(context, '还没有搜索历史');
+      return;
+    }
+    final picked = await showTvMenu<String>(
+      context: context,
+      title: '搜索历史',
+      items: _searchHistory
+          .map(
+            (h) => TvMenuItem<String>(value: h, label: h, icon: Icons.history),
+          )
+          .toList(growable: false),
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _keyword = picked;
+      _page = 1;
+      _section = _BiliSection.search;
+      _selected = null;
+      _detail = null;
+    });
+    await _search();
+  }
+
+  Future<void> _changePage(int delta) async {
+    if (!_canPage) return;
+    final next = _page + delta;
+    if (next < 1) return;
+    setState(() {
+      _page = next;
+      _selected = null;
+      _detail = null;
+    });
+    if (_section == _BiliSection.recommend) {
+      await _loadRecommend();
+    } else {
+      await _search();
+    }
+  }
+
+  // ===== 数据加载 =====
+
+  Future<void> _loadRecommend() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final list = await BiliClient.instance.recommend(page: _page);
+      if (!mounted) return;
+      setState(() {
+        _recommend = list;
+        _loading = false;
+        if (list.isEmpty) _error = '暂时没有拿到推荐内容，按「重新加载」或改用搜索';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _recommend = <BiliVideo>[];
+        _loading = false;
+        _error = '$error';
+      });
+    }
+  }
+
   Future<void> _search() async {
     if (_keyword.trim().isEmpty) {
       await _promptSearch();
@@ -127,6 +350,7 @@ class BilibiliViewState extends State<BilibiliView>
       setState(() {
         _results = results;
         _loading = false;
+        _section = _BiliSection.search;
       });
     } catch (error) {
       if (!mounted) return;
@@ -138,15 +362,19 @@ class BilibiliViewState extends State<BilibiliView>
     }
   }
 
-  Future<void> _changePage(int delta) async {
-    final next = _page + delta;
-    if (next < 1) return;
+  Future<void> _switchSection(_BiliSection section) async {
     setState(() {
-      _page = next;
-      _detail = null;
+      _section = section;
       _selected = null;
+      _detail = null;
+      _error = null;
     });
-    await _search();
+    if (section == _BiliSection.recommend && _recommend.isEmpty) {
+      await _loadRecommend();
+    } else if (section == _BiliSection.history ||
+        section == _BiliSection.favorites) {
+      await _loadLibrary();
+    }
   }
 
   Future<void> _openDetail(BiliVideo video) async {
@@ -172,6 +400,8 @@ class BilibiliViewState extends State<BilibiliView>
     }
   }
 
+  // ===== 播放与收藏 =====
+
   Future<bool> _ensureProxy() async {
     if (await NetworkMediaService.ensureProxy()) return true;
     await showTvAlert(
@@ -181,7 +411,14 @@ class BilibiliViewState extends State<BilibiliView>
     return false;
   }
 
-  List<Song> _songsOf(BiliVideoDetail detail, List<BiliPage> pages) {
+  List<Song> _songsOf(
+    BiliVideoDetail detail,
+    List<BiliPage> pages, {
+    String? coverUrl,
+  }) {
+    final art = (coverUrl != null && coverUrl.isNotEmpty)
+        ? coverUrl
+        : (_selected?.cover ?? '');
     return pages.map((page) {
       final title = pages.length > 1
           ? '${detail.title} · P${page.page} ${page.part}'
@@ -193,6 +430,8 @@ class BilibiliViewState extends State<BilibiliView>
         author: detail.author,
         mode: _mode,
         durationSeconds: page.durationSeconds,
+        artworkUrl: art,
+        mediaId: 'bilibili:${detail.bvid}:${page.cid}:${_mode.name}',
       );
     }).toList();
   }
@@ -207,6 +446,8 @@ class BilibiliViewState extends State<BilibiliView>
       await notifier.addSongsToPlayingQueue(songs);
     } else {
       await notifier.playFromDynamicList(songs, index);
+      // 只有真正开始播放才记入历史播放，加入队列不算。
+      await _recordPlay(songs[index]);
     }
   }
 
@@ -219,178 +460,173 @@ class BilibiliViewState extends State<BilibiliView>
     await _playPages(0, enqueue: enqueue);
   }
 
-  Future<void> _openLogin() async {
-    final changed = await showTvQrLogin(context: context);
-    if (mounted) {
-      setState(() => _loggedIn = BiliAuthStore.instance.isLoggedIn || changed);
+  Future<void> _playSong(Song song) async {
+    if (!await _ensureProxy()) return;
+    await context.read<PlaylistContentNotifier>().playFromDynamicList(
+      <Song>[song],
+      0,
+    );
+    await _recordPlay(song);
+  }
+
+  Future<void> _recordPlay(Song song) async {
+    await BiliLibraryStore.instance.recordPlay(song);
+    await _loadLibrary();
+  }
+
+  bool _isVideoFavorited(BiliVideo video) {
+    for (final song in _favorites) {
+      final id = RemoteMediaRegistry.mediaIdOf(song.filePath) ?? '';
+      if (id.startsWith('bilibili:${video.bvid}:')) return true;
+    }
+    return false;
+  }
+
+  Future<void> _toggleFavoriteVideo(BiliVideo video) async {
+    if (!await _ensureProxy()) return;
+    try {
+      final detail = await BiliClient.instance.view(video.bvid);
+      if (!mounted) return;
+      final cover = detail.cover.isNotEmpty ? detail.cover : video.cover;
+      final songs = _songsOf(detail, detail.pages, coverUrl: cover);
+      await BiliLibraryStore.instance.load();
+      final anyFavorited = songs.any(
+        (s) => BiliLibraryStore.instance.isFavorite(s.filePath),
+      );
+      if (anyFavorited) {
+        for (final song in songs) {
+          await BiliLibraryStore.instance.removeFavorite(song.filePath);
+        }
+        await showTvAlert(context, '已取消收藏「${video.title}」');
+      } else {
+        await BiliLibraryStore.instance.addFavorites(songs);
+        await showTvAlert(context, '已收藏「${video.title}」共 ${songs.length} 首');
+      }
+      await _loadLibrary();
+    } catch (error) {
+      await showTvAlert(context, '收藏失败：$error');
     }
   }
 
-  Future<void> _showHistory() async {
-    if (_history.isEmpty) {
-      await showTvAlert(context, '还没有搜索历史');
-      return;
-    }
-    final picked = await showDialog<String>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('搜索历史', style: TextStyle(fontSize: 16)),
-        content: SizedBox(
-          width: 360,
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                for (var i = 0; i < _history.length; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 6),
-                    child: TvActionButton(
-                      label: _history[i],
-                      icon: Icons.history,
-                      autofocus: i == 0,
-                      onPressed: () =>
-                          Navigator.of(dialogContext).pop(_history[i]),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        ),
-        actions: <Widget>[
-          TvActionButton(
-            label: '关闭',
-            onPressed: () => Navigator.of(dialogContext).pop(),
-          ),
-        ],
-      ),
-    );
-    if (picked == null || !mounted) return;
-    setState(() {
-      _keyword = picked;
-      _page = 1;
-    });
-    await _search();
+  Future<void> _toggleFavoriteDetail() async {
+    final video = _selected;
+    if (video == null) return;
+    await _toggleFavoriteVideo(video);
   }
+
+  static String _fmt(Duration? duration) {
+    if (duration == null) return '--:--';
+    final total = duration.inSeconds;
+    final minutes = total ~/ 60;
+    final seconds = total % 60;
+    return '${minutes.toString().padLeft(2, '0')}:'
+        '${seconds.toString().padLeft(2, '0')}';
+  }
+
+  // ===== UI =====
 
   @override
   Widget build(BuildContext context) {
     super.build(context);
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text('哔哩哔哩', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            '搜索 / BV 号 / 分 P / 队列 · 流式播放，不占用电视本地空间',
-            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          // 一行工具条：只保留 搜索 / 打开 BV 号 / 更多 与紧凑翻页。
+          Row(
             children: <Widget>[
               SizedBox(
-                width: 196,
+                width: 118,
                 child: TvActionButton(
-                  label: '搜索关键词',
-                  value: _keyword.isEmpty ? '未设置' : _keyword,
+                  label: '搜索',
                   icon: Icons.search,
                   onPressed: _promptSearch,
                 ),
               ),
+              const SizedBox(width: 8),
               SizedBox(
-                width: 176,
+                width: 152,
                 child: TvActionButton(
-                  label: '打开 BV 号 / 链接',
+                  label: '打开 BV 号',
                   icon: Icons.link,
                   onPressed: _promptBvid,
-                ),
-              ),
-              SizedBox(
-                width: 148,
-                child: TvActionButton(
-                  label: '搜索历史',
-                  icon: Icons.history,
-                  onPressed: _showHistory,
-                ),
-              ),
-              SizedBox(
-                width: 168,
-                child: TvActionButton(
-                  label: '扫码登录',
-                  value: _loggedIn ? '已登录' : '未登录',
-                  icon: Icons.qr_code_2,
-                  selected: _loggedIn,
-                  onPressed: _openLogin,
-                ),
-              ),
-              SizedBox(
-                width: 188,
-                child: TvActionButton(
-                  label: '流类型',
-                  value: _mode == BiliStreamMode.audio
-                      ? '音频流（推荐）'
-                      : '视频流',
-                  icon: Icons.audiotrack_outlined,
-                  onPressed: () => setState(() {
-                    _mode = _mode == BiliStreamMode.audio
-                        ? BiliStreamMode.video
-                        : BiliStreamMode.audio;
-                  }),
-                ),
-              ),
-              SizedBox(
-                width: 188,
-                child: TvActionButton(
-                  label: '点击行为',
-                  value: _enqueueMode ? '加入队列' : '立即播放',
-                  icon: Icons.touch_app_outlined,
-                  selected: _enqueueMode,
-                  onPressed: () =>
-                      setState(() => _enqueueMode = !_enqueueMode),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: <Widget>[
-              SizedBox(
-                width: 108,
-                child: TvActionButton(
-                  label: '上一页',
-                  icon: Icons.chevron_left,
-                  enabled: _page > 1,
-                  onPressed: () => _changePage(-1),
                 ),
               ),
               const SizedBox(width: 8),
               SizedBox(
                 width: 108,
                 child: TvActionButton(
-                  label: '下一页',
-                  icon: Icons.chevron_right,
-                  onPressed: () => _changePage(1),
+                  label: '更多',
+                  icon: Icons.menu,
+                  onPressed: _openMore,
                 ),
               ),
-              const SizedBox(width: 12),
+              const Spacer(),
+              TvIconButton(
+                icon: Icons.chevron_left,
+                semanticLabel: '上一页',
+                enabled: _canPage && _page > 1,
+                onPressed: () => _changePage(-1),
+              ),
+              const SizedBox(width: 6),
+              TvIconButton(
+                icon: Icons.chevron_right,
+                semanticLabel: '下一页',
+                enabled: _canPage,
+                onPressed: () => _changePage(1),
+              ),
+              const SizedBox(width: 10),
               Text(
-                '第 $_page 页 · 关键词「$_keyword」',
-                style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+                '第 $_page 页',
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
+          // 独立分区选项栏。
+          SizedBox(
+            height: 46,
+            child: Row(
+              children: <Widget>[
+                for (final section in _BiliSection.values) ...<Widget>[
+                  SizedBox(
+                    width: 126,
+                    child: TvActionButton(
+                      label: section.label,
+                      icon: section.icon,
+                      selected: _section == section,
+                      onPressed: () => _switchSection(section),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                const Spacer(),
+                Text(
+                  _section == _BiliSection.search && _keyword.isNotEmpty
+                      ? '关键词：$_keyword'
+                      : '',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
           Expanded(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                Expanded(flex: 3, child: _buildResults(scheme)),
-                const VerticalDivider(width: 1),
-                SizedBox(width: 330, child: _buildDetail(scheme)),
+                Expanded(child: _buildMainList(scheme)),
+                if (_selected != null) ...<Widget>[
+                  const VerticalDivider(width: 1),
+                  SizedBox(width: 300, child: _buildDetail(scheme)),
+                ],
               ],
             ),
           ),
@@ -399,80 +635,170 @@ class BilibiliViewState extends State<BilibiliView>
     );
   }
 
-  Widget _buildResults(ColorScheme scheme) {
+  Widget _buildMainList(ColorScheme scheme) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(Icons.error_outline, size: 40, color: scheme.error),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
-            const SizedBox(height: 14),
-            SizedBox(
-              width: 140,
-              child: TvActionButton(
-                label: '重新搜索',
-                icon: Icons.refresh,
-                autofocus: true,
-                onPressed: _search,
-              ),
-            ),
-          ],
-        ),
+      return _buildMessage(
+        scheme,
+        icon: Icons.error_outline,
+        message: _error!,
+        actionLabel: '重新加载',
+        onAction: () {
+          if (_section == _BiliSection.recommend) {
+            _loadRecommend();
+          } else if (_section == _BiliSection.search) {
+            _search();
+          } else {
+            _loadLibrary();
+          }
+        },
       );
     }
-    if (_results.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(Icons.search, size: 48, color: scheme.outline),
-            const SizedBox(height: 10),
-            Text(
-              '按「搜索关键词」或「打开 BV 号 / 链接」开始',
+    switch (_section) {
+      case _BiliSection.recommend:
+      case _BiliSection.search:
+        final videos = _section == _BiliSection.recommend
+            ? _recommend
+            : _results;
+        if (videos.isEmpty) {
+          return _buildMessage(
+            scheme,
+            icon: _section == _BiliSection.recommend
+                ? Icons.auto_awesome_outlined
+                : Icons.search,
+            message: _section == _BiliSection.recommend
+                ? '按「重新加载」获取推荐，或用「搜索」找内容'
+                : '没有搜索结果，换个关键词或翻页试试',
+            actionLabel: _section == _BiliSection.recommend
+                ? '重新加载'
+                : '搜索',
+            onAction: _section == _BiliSection.recommend
+                ? _loadRecommend
+                : _promptSearch,
+          );
+        }
+        return _buildVideoList(videos);
+      case _BiliSection.history:
+        if (_history.isEmpty) {
+          return _buildMessage(
+            scheme,
+            icon: Icons.history,
+            message: '还没有历史播放，播放过的哔哩哔哩歌曲会出现在这里',
+            actionLabel: '去推荐',
+            onAction: () => _switchSection(_BiliSection.recommend),
+          );
+        }
+        return _buildSongList(_history);
+      case _BiliSection.favorites:
+        if (_favorites.isEmpty) {
+          return _buildMessage(
+            scheme,
+            icon: Icons.star_border,
+            message: '还没有收藏，在推荐 / 搜索结果里按星标即可收藏',
+            actionLabel: '去推荐',
+            onAction: () => _switchSection(_BiliSection.recommend),
+          );
+        }
+        return _buildSongList(_favorites);
+    }
+  }
+
+  Widget _buildMessage(
+    ColorScheme scheme, {
+    required IconData icon,
+    required String message,
+    required String actionLabel,
+    required VoidCallback onAction,
+  }) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          Icon(icon, size: 44, color: scheme.outline),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Text(
+              message,
+              textAlign: TextAlign.center,
               style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
             ),
-          ],
-        ),
-      );
-    }
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            width: 150,
+            child: TvActionButton(
+              label: actionLabel,
+              icon: Icons.refresh,
+              onPressed: onAction,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVideoList(List<BiliVideo> videos) {
     return ListView.separated(
-      itemCount: _results.length,
+      itemCount: videos.length,
       separatorBuilder: (_, __) => const SizedBox(height: 5),
       itemBuilder: (context, index) {
-        final video = _results[index];
-        return TvActionButton(
-          label: video.title,
-          value: '${video.author} · ${video.durationLabel}',
-          icon: Icons.smart_display_outlined,
-          selected: _selected?.bvid == video.bvid,
-          onPressed: () => _openDetail(video),
+        final video = videos[index];
+        final favorited = _isVideoFavorited(video);
+        return Row(
+          children: <Widget>[
+            Expanded(
+              child: TvActionButton(
+                label: video.title,
+                value: '${video.author} · ${video.durationLabel}',
+                icon: Icons.smart_display_outlined,
+                selected: _selected?.bvid == video.bvid,
+                onPressed: () => _openDetail(video),
+              ),
+            ),
+            const SizedBox(width: 8),
+            TvIconButton(
+              icon: favorited ? Icons.star : Icons.star_border,
+              semanticLabel: favorited ? '取消收藏' : '收藏',
+              size: 34,
+              onPressed: () => _toggleFavoriteVideo(video),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 收藏 / 历史播放按普通歌单歌曲处理：点击即播，直接显示元数据与封面，
+  /// 列表内不提供任何额外的「更多」菜单。
+  Widget _buildSongList(List<Song> songs) {
+    return ListView.separated(
+      itemCount: songs.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 5),
+      itemBuilder: (context, index) {
+        final song = songs[index];
+        return Row(
+          children: <Widget>[
+            RemoteArtwork(mediaUrl: song.filePath, size: 46),
+            const SizedBox(width: 10),
+            Expanded(
+              child: TvActionButton(
+                label: song.title,
+                value: '${song.artist} · ${_fmt(song.duration)}',
+                onPressed: () => _playSong(song),
+              ),
+            ),
+          ],
         );
       },
     );
   }
 
   Widget _buildDetail(ColorScheme scheme) {
-    if (_selected == null) {
-      return Center(
-        child: Text(
-          '选中左侧视频后\n在这里展开全部分 P',
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-        ),
-      );
-    }
+    final video = _selected;
+    if (video == null) return const SizedBox.shrink();
     if (_detailLoading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -496,8 +822,7 @@ class BilibiliViewState extends State<BilibiliView>
               width: 140,
               child: TvActionButton(
                 label: '重试',
-                autofocus: true,
-                onPressed: () => _openDetail(_selected!),
+                onPressed: () => _openDetail(video),
               ),
             ),
           ],
@@ -518,34 +843,78 @@ class BilibiliViewState extends State<BilibiliView>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Text(
-            detail.title,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            '${detail.author} · 共 ${detail.pages.length} 个分 P',
-            style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              if (detail.cover.isNotEmpty)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: Image.network(
+                    detail.cover,
+                    headers: BiliClient.instance.imageHeaders,
+                    width: 62,
+                    height: 62,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => Icon(
+                      Icons.smart_display_outlined,
+                      size: 48,
+                      color: scheme.outline,
+                    ),
+                  ),
+                ),
+              if (detail.cover.isNotEmpty) const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      detail.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${detail.author} · 共 ${detail.pages.length} 个分 P',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          Row(
             children: <Widget>[
-              SizedBox(
-                width: 148,
+              Expanded(
                 child: TvActionButton(
-                  label: '播放全部分 P',
+                  label: '播放全部',
                   icon: Icons.play_arrow,
                   onPressed: () => _playAllPages(enqueue: false),
                 ),
               ),
-              SizedBox(
-                width: 148,
+              const SizedBox(width: 6),
+              Expanded(
                 child: TvActionButton(
-                  label: '全部加入队列',
+                  label: _isVideoFavorited(video) ? '取消收藏' : '收藏',
+                  icon: _isVideoFavorited(video)
+                      ? Icons.star
+                      : Icons.star_border,
+                  onPressed: _toggleFavoriteDetail,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: TvActionButton(
+                  label: '加入队列',
                   icon: Icons.playlist_add,
                   onPressed: () => _playAllPages(enqueue: true),
                 ),
@@ -563,10 +932,7 @@ class BilibiliViewState extends State<BilibiliView>
                   label: 'P${page.page} ${page.part}',
                   value: page.durationLabel,
                   icon: Icons.play_circle_outline,
-                  onPressed: () => _playPages(
-                    index,
-                    enqueue: _enqueueMode,
-                  ),
+                  onPressed: () => _playPages(index, enqueue: false),
                 );
               },
             ),

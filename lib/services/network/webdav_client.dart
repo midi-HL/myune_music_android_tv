@@ -24,8 +24,15 @@ class WebDavClient {
     r'<(?:[\w.\-]+:)?href\b[^>]*>([\s\S]*?)</(?:[\w.\-]+:)?href>',
     caseSensitive: false,
   );
-  static final RegExp _collectionRe = RegExp(
-    r'<(?:[\w.\-]+:)?collection\s*/>',
+  // 兼容 `<d:resourcetype>...</d:resourcetype>` 包裹（含属性、换行、多行）。
+  static final RegExp _resourceTypeRe = RegExp(
+    r'<(?:[\w.\-]+:)?resourcetype\b[^>]*>([\s\S]*?)</(?:[\w.\-]+:)?resourcetype>',
+    caseSensitive: false,
+  );
+  // 只匹配开标签：兼容 `<d:collection/>`、`<D:collection></D:collection>`、
+  // `<d:collection xmlns:d="DAV:"/>`、`<collection />` 以及带任意属性的形式。
+  static final RegExp _collectionTagRe = RegExp(
+    r'<(?:[\w.\-]+:)?collection\b',
     caseSensitive: false,
   );
   static final RegExp _lengthRe = RegExp(
@@ -34,6 +41,10 @@ class WebDavClient {
   );
   static final RegExp _modifiedRe = RegExp(
     r'<(?:[\w.\-]+:)?getlastmodified\b[^>]*>([\s\S]*?)</(?:[\w.\-]+:)?getlastmodified>',
+    caseSensitive: false,
+  );
+  static final RegExp _displayNameRe = RegExp(
+    r'<(?:[\w.\-]+:)?displayname\b[^>]*>([\s\S]*?)</(?:[\w.\-]+:)?displayname>',
     caseSensitive: false,
   );
 
@@ -127,6 +138,8 @@ class WebDavClient {
         contentLength: response.contentLength,
         requestedStart: start,
         requestedEnd: end,
+        // 上游是否真的返回了 206。忽略 Range 时代理会自行跳过起点字节。
+        upstreamPartial: response.statusCode == 206,
       );
 
       return RemoteStreamResult(
@@ -146,10 +159,25 @@ class WebDavClient {
     }
   }
 
+  /// 判断一个 <response> 块是否代表目录。
+  ///
+  /// 老版本只认 `<d:collection/>` 自闭合标签，导致群晖 / Nextcloud / 绿联 /
+  /// 极空间等 NAS 返回的 `<D:collection></D:collection>`、带命名空间属性或
+  /// 大写前缀形式被误判成「无后缀文件」，目录无法进入。这里先看
+  /// resourcetype 块，再用 href 尾部斜杠兜底。
+  bool _isCollection(String block, bool hrefEndsWithSlash) {
+    final rt = _resourceTypeRe.firstMatch(block);
+    if (rt != null) {
+      return _collectionTagRe.hasMatch(rt.group(1) ?? '');
+    }
+    if (_collectionTagRe.hasMatch(block)) return true;
+    return hrefEndsWithSlash;
+  }
+
   List<RemoteEntry> _parsePropfind(String body, Uri requestedDir) {
     final entries = <RemoteEntry>[];
     final seen = <String>{};
-    final requestedPath = requestedDir.path;
+    final requestedPath = _decodePath(requestedDir.path);
 
     for (final match in _responseRe.allMatches(body)) {
       final block = match.group(1) ?? '';
@@ -158,24 +186,35 @@ class WebDavClient {
       final rawHref = xmlUnescape(hrefMatch.group(1) ?? '').trim();
       if (rawHref.isEmpty) continue;
 
-      final isDirectory = _collectionRe.hasMatch(block);
-
-      // PROPFIND Depth:1 会把自己也返回，跳过目录自身。
-      var candidatePath = rawHref;
+      // 把 href 统一解析成绝对 URL 再存进 RemoteEntry.path：
+      // 1) 支持服务端返回相对 href；
+      // 2) 进入子目录后再次 GET / PROPFIND 不会错误地相对「配置根目录」解析，
+      //    这是之前 WebDAV 子目录里的文件播放报 loading failed 的根因之一。
+      // 部分 NAS 会返回未编码的中文 href，Uri.resolve 会抛 FormatException，
+      // 这里退化成 encodeFull 再解析，避免整个目录列举失败。
+      Uri absolute;
       try {
-        final parsed = Uri.parse(rawHref);
-        if (parsed.hasScheme) candidatePath = parsed.path;
+        absolute = requestedDir.resolve(rawHref);
       } catch (_) {
-        candidatePath = rawHref;
+        try {
+          absolute = requestedDir.resolve(Uri.encodeFull(rawHref));
+        } catch (_) {
+          continue;
+        }
       }
-      final normalizedSelf = candidatePath.replaceAll(RegExp(r'/+$'), '');
-      final normalizedRequested = requestedPath.replaceAll(RegExp(r'/+$'), '');
-      if (normalizedSelf == normalizedRequested) continue;
+      final absoluteHref = absolute.toString();
+      final hrefEndsWithSlash = absolute.path.endsWith('/');
+      final isDirectory = _isCollection(block, hrefEndsWithSlash);
 
-      if (!seen.add(rawHref)) continue;
+      // PROPFIND Depth:1 会把自己也返回，跳过目录自身。比较时用解码后的
+      // 路径，兼容服务端 href 与本地请求一个编码、一个不编码的情况。
+      final selfPath = _decodePath(absolute.path);
+      if (selfPath == requestedPath) continue;
+      if (!seen.add(absoluteHref)) continue;
 
       final lengthMatch = _lengthRe.firstMatch(block);
       final modifiedMatch = _modifiedRe.firstMatch(block);
+      final displayMatch = _displayNameRe.firstMatch(block);
       int? size;
       if (lengthMatch != null) {
         size = int.tryParse((lengthMatch.group(1) ?? '').trim());
@@ -184,11 +223,16 @@ class WebDavClient {
       if (modifiedMatch != null) {
         modified = DateTime.tryParse((modifiedMatch.group(1) ?? '').trim());
       }
+      var name = remoteEntryName(absolute.path, isDirectory: isDirectory);
+      if (displayMatch != null) {
+        final display = xmlUnescape(displayMatch.group(1) ?? '').trim();
+        if (display.isNotEmpty) name = display;
+      }
 
       entries.add(
         RemoteEntry(
-          name: remoteEntryName(rawHref, isDirectory: isDirectory),
-          path: rawHref,
+          name: name,
+          path: absoluteHref,
           isDirectory: isDirectory,
           size: isDirectory ? null : size,
           modified: modified,
@@ -201,6 +245,16 @@ class WebDavClient {
       return a.name.toLowerCase().compareTo(b.name.toLowerCase());
     });
     return entries;
+  }
+
+  String _decodePath(String path) {
+    var decoded = path;
+    try {
+      decoded = Uri.decodeComponent(decoded);
+    } catch (_) {
+      // 非法百分号编码时保留原值。
+    }
+    return decoded.replaceAll(RegExp(r'/+$'), '');
   }
 
   String _shortError(String body) {

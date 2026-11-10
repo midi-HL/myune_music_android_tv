@@ -13,7 +13,7 @@ class TvAppInfo {
   /// 本 TV 改版的版本号。
   /// 与上游桌面版 `appVersion`（0.9.5）分开计数：检查更新比较的是这个值，
   /// 对应本仓库 Release 的 tag 格式 `vX.Y.Z`（例如 v1.0.0）。
-  static const String version = '1.1.0';
+  static const String version = '1.1.1';
 
   /// 本 TV 改版开源仓库：关于页、Issue、检查更新全部指向这里。
   static const String repoOwner = 'midi-HL';

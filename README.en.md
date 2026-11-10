@@ -62,7 +62,7 @@ and the existing phone behaviour (immersive mode, UI scaling, SAF) is unchanged.
 | Original upstream README | [UPSTREAM_README.md](UPSTREAM_README.md) (preserved verbatim) |
 | **This fork's repository** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | This fork's license | **Apache License 2.0** (same as upstream) |
-| This fork's version | `1.1.0` (see `lib/tv/tv_app_info.dart`) |
+| This fork's version | `1.1.1` (see `lib/tv/tv_app_info.dart`) |
 
 The **full upstream commit history is preserved** (no squash, no history rewrite). All port
 work is recorded as additional commits and tags so it can be rolled back at any time. See
@@ -332,6 +332,7 @@ Full history and anchor tags are preserved:
 | `tv-v2-focus-fix` / `tv-v3-focus-fix` / `tv-v4-focus-fix` | Successive TV focus fix rounds |
 | `v1.0.0` | First open-source release (app info / update checks / three ABIs, debug-signed) |
 | `v1.1.0` | Network media (WebDAV / FTP / Bilibili) + fixed release signing |
+| `v1.1.1` | Network playback fixes, Bilibili pagination redesign, play history / favorites, legacy audio format support |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor

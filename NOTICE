@@ -33,6 +33,12 @@ This product includes software developed by xiaobaimc:
 - 电视端文本输入：字段按钮 → 单字段输入弹窗 → autofocus + 显式 TextInput.show，
   保证软键盘可唤出；文本输入获焦时全局 TV 输入层不劫持任何按键。
 - 二维码登录：qr_flutter 渲染二维码，轮询扫码状态，仅在本机保存登录 Cookie。
+- v1.1.1 网络媒体修复：WebDAV 目录识别（resourcetype / collection 命名空间兼容）与绝对 href 解析；
+  HTTP Range 上游忽略时的代理侧字节跳过；FTP REST/RETR 顺序与 PASV 私网地址回退；媒体标识、协议与
+  audio/video 类型的集中规范化；网络媒体的元数据 / 封面注册表与 Song JSON 持久化，避免「歌曲文件不存在」误报。
+- v1.1.1 电视端调整：哔哩哔哩分区（推荐 / 搜索结果 / 历史播放 / 收藏）、更多层级与扫码登录深层入口；
+  网盘进入后全屏文件列表与「上一步」返回；常见及老旧音频格式列表兼容、视频容器仅音频播放；
+  焦点与软键盘可达性复核。
 
 Modifications to the upstream work (Android / Android TV port) by
 辰星 | Edwin 3J | HLmidi include: Android platform isolation, SAF/content:// library

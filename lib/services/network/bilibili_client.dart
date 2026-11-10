@@ -149,6 +149,12 @@ class BiliClient {
         'Cookie': _cookieHeader(),
       };
 
+  /// 供封面图片下载使用（图片 CDN 不带 Cookie，但要带 UA / Referer）。
+  Map<String, String> get imageHeaders => <String, String>{
+        'User-Agent': _userAgent,
+        'Referer': _referer,
+      };
+
   Map<String, String> _apiHeaders() => <String, String>{
         'User-Agent': _userAgent,
         'Referer': _referer,
@@ -274,6 +280,101 @@ class BiliClient {
       throw Exception('B 站接口 HTTP ${response.statusCode}');
     }
     return _decode(response.body);
+  }
+
+  /// 首页推荐流。不同账号 / 网络环境下 rcmd 接口可能被风控，因此按顺序
+  /// 回退到「热门」和「全站排行榜」，保证分页主体默认一定有内容可展示。
+  Future<List<BiliVideo>> recommend({int page = 1}) async {
+    await _ensureIdentity();
+    try {
+      await _ensureWbi();
+      final params = <String, String>{
+        'ps': '20',
+        'fresh_type': '4',
+        'feed_version': 'V8',
+        'fresh_idx': page.toString(),
+        'fresh_idx_1h': page.toString(),
+        'brush': '0',
+        'web_location': '1430650',
+      };
+      final result = await _getJson(
+        Uri.https(
+          'api.bilibili.com',
+          '/x/web-interface/wbi/index/top/feed/rcmd',
+          _sign(params),
+        ),
+      );
+      if (result['code'] == 0) {
+        final data = result['data'];
+        final videos = _parseVideoList(data is Map ? data['item'] : null);
+        if (videos.isNotEmpty) return videos;
+      }
+    } catch (_) {
+      // 继续回退。
+    }
+    try {
+      final result = await _getJson(
+        Uri.https(
+          'api.bilibili.com',
+          '/x/web-interface/popular',
+          <String, String>{'ps': '20', 'pn': page.toString()},
+        ),
+      );
+      if (result['code'] == 0) {
+        final data = result['data'];
+        final videos = _parseVideoList(data is Map ? data['list'] : null);
+        if (videos.isNotEmpty) return videos;
+      }
+    } catch (_) {
+      // 继续回退。
+    }
+    try {
+      final result = await _getJson(
+        Uri.https(
+          'api.bilibili.com',
+          '/x/web-interface/ranking/v2',
+          <String, String>{'rid': '0', 'type': 'all'},
+        ),
+      );
+      if (result['code'] == 0) {
+        final data = result['data'];
+        final videos = _parseVideoList(data is Map ? data['list'] : null);
+        if (videos.isNotEmpty) return videos;
+      }
+    } catch (_) {
+      // 全部端点失败时返回空列表，由 UI 显示可重试的提示。
+    }
+    return <BiliVideo>[];
+  }
+
+  /// 把搜索 / 推荐 / 热门 / 排行榜的 JSON 列表统一成 [BiliVideo]。
+  List<BiliVideo> _parseVideoList(Object? raw) {
+    if (raw is! List) return <BiliVideo>[];
+    final videos = <BiliVideo>[];
+    for (final item in raw) {
+      if (item is! Map) continue;
+      final bvid = (item['bvid'] ?? '').toString();
+      if (bvid.isEmpty) continue;
+      final owner = item['owner'];
+      final author = owner is Map
+          ? _cleanHtml((owner['name'] ?? '').toString())
+          : _cleanHtml((item['author'] ?? '').toString());
+      final coverRaw = (item['pic'] ?? item['cover'] ?? '').toString();
+      videos.add(
+        BiliVideo(
+          bvid: bvid,
+          title: _cleanHtml((item['title'] ?? '').toString()),
+          author: author,
+          cover: _normalizeCover(coverRaw),
+          description: _cleanHtml((item['desc'] ?? item['description'] ?? '')
+              .toString()),
+          durationSeconds: _parseDuration(
+            item['duration'] ?? item['durationSeconds'],
+          ),
+        ),
+      );
+    }
+    return videos;
   }
 
   /// 关键词搜索视频。WBI 端点失败时自动回退到旧端点。

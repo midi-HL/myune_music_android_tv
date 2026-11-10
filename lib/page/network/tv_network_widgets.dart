@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../services/network/bilibili_client.dart';
+import '../../services/network/remote_media_registry.dart';
 import '../../services/network/remote_source.dart';
 import '../../tv/tv_focus_nav.dart';
 
@@ -760,6 +762,220 @@ class _TvQrLoginDialogState extends State<_TvQrLoginDialog> {
           onPressed: () => Navigator.of(context).pop(_loggedIn),
         ),
       ],
+    );
+  }
+}
+
+// ===== 通用「更多」菜单 / 紧凑控件 / 网络封面 =====
+
+class TvMenuItem<T> {
+  const TvMenuItem({
+    required this.value,
+    required this.label,
+    this.valueText,
+    this.icon,
+    this.enabled = true,
+  });
+
+  final T value;
+  final String label;
+  final String? valueText;
+  final IconData? icon;
+  final bool enabled;
+}
+
+/// 通用单列菜单对话框。所有条目都是遥控器可达的 TvActionButton，
+/// 用于把原来平铺在页面上的次要功能收进「更多」层级。
+Future<T?> showTvMenu<T>({
+  required BuildContext context,
+  required String title,
+  required List<TvMenuItem<T>> items,
+}) {
+  final firstEnabled = items.indexWhere((TvMenuItem<T> item) => item.enabled);
+  return showDialog<T>(
+    context: context,
+    builder: (BuildContext dialogContext) => AlertDialog(
+      title: Text(title, style: const TextStyle(fontSize: 16)),
+      content: SizedBox(
+        width: 420,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              for (var i = 0; i < items.length; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: TvActionButton(
+                    label: items[i].label,
+                    value: items[i].valueText,
+                    icon: items[i].icon,
+                    enabled: items[i].enabled,
+                    autofocus: i == firstEnabled,
+                    onPressed: () =>
+                        Navigator.of(dialogContext).pop(items[i].value),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        TvActionButton(
+          label: '关闭',
+          onPressed: () => Navigator.of(dialogContext).pop(),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 紧凑的图标按钮：用于「上一页 / 下一页」这类只需要一行高度的操作，
+/// 同样同时支持遥控器 OK 与鼠标 / 触控。
+class TvIconButton extends StatelessWidget {
+  const TvIconButton({
+    required this.icon,
+    required this.onPressed,
+    this.semanticLabel,
+    this.enabled = true,
+    this.autofocus = false,
+    this.size = 34,
+    super.key,
+  });
+
+  final IconData icon;
+  final VoidCallback onPressed;
+  final String? semanticLabel;
+  final bool enabled;
+  final bool autofocus;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.4,
+      child: MouseRegion(
+        cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: enabled ? onPressed : null,
+          child: TvFocusHighlight(
+            autofocus: autofocus,
+            debugLabel: semanticLabel ?? 'tv-net-icon',
+            onActivate: enabled ? onPressed : null,
+            builder: (BuildContext context, bool focused) {
+              return AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                width: size + 10,
+                height: size + 10,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: focused
+                      ? scheme.primary.withValues(alpha: 0.30)
+                      : scheme.surfaceContainerHighest.withValues(alpha: 0.55),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  icon,
+                  size: size - 8,
+                  color: focused ? scheme.primary : scheme.onSurfaceVariant,
+                  semanticLabel: semanticLabel,
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 网络媒体的封面：优先用 Song 里已保存的字节，其次按需从 URL 编码的
+/// 封面地址下载（走本机代理，WebDAV / FTP / B 站 CDN 鉴权都被代理补齐）。
+/// 下载失败时显示占位图标，不影响列表与播放。
+class RemoteArtwork extends StatefulWidget {
+  const RemoteArtwork({
+    required this.mediaUrl,
+    this.size = 44,
+    this.placeholder = Icons.music_note_outlined,
+    super.key,
+  });
+
+  final String mediaUrl;
+  final double size;
+  final IconData placeholder;
+
+  @override
+  State<RemoteArtwork> createState() => _RemoteArtworkState();
+}
+
+class _RemoteArtworkState extends State<RemoteArtwork> {
+  Uint8List? _bytes;
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(RemoteArtwork oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.mediaUrl != widget.mediaUrl) {
+      _bytes = null;
+      _load();
+    }
+  }
+
+  Future<void> _load() async {
+    final cached = RemoteMediaRegistry.cachedArtwork(widget.mediaUrl);
+    if (cached != null && cached.isNotEmpty) {
+      if (mounted) setState(() => _bytes = cached);
+      return;
+    }
+    final song = RemoteMediaRegistry.lookup(widget.mediaUrl);
+    if (song?.albumArt != null && song!.albumArt!.isNotEmpty) {
+      if (mounted) setState(() => _bytes = song.albumArt);
+      return;
+    }
+    if (_loading) return;
+    _loading = true;
+    try {
+      final bytes = await RemoteMediaRegistry.artworkFor(widget.mediaUrl);
+      if (mounted && bytes != null && bytes.isNotEmpty) {
+        setState(() => _bytes = bytes);
+      }
+    } finally {
+      _loading = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: SizedBox(
+        width: widget.size,
+        height: widget.size,
+        child: _bytes != null
+            ? Image.memory(
+                _bytes!,
+                width: widget.size,
+                height: widget.size,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+              )
+            : ColoredBox(
+                color: scheme.surfaceContainerHighest,
+                child: Icon(
+                  widget.placeholder,
+                  size: widget.size * 0.5,
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+      ),
     );
   }
 }

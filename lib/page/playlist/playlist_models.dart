@@ -1,6 +1,8 @@
-import 'package:uuid/uuid.dart';
+import 'dart:convert';
 import 'dart:typed_data';
+
 import 'package:path/path.dart' as p;
+import 'package:uuid/uuid.dart';
 
 class Song {
   final String title;
@@ -22,15 +24,49 @@ class Song {
     this.trackNumber,
   }) : normalizedPath = p.normalize(filePath);
 
+  /// 封面写入 JSON，让「收藏 / 历史播放」里的网络媒体在应用重启后
+  /// 仍能直接显示封面。设置上限避免 shared_preferences 被超大图撑爆。
+  static const int _maxPersistedArtworkBytes = 512 * 1024;
+
   Map<String, dynamic> toJson() {
-    return {'title': title, 'artist': artist, 'filePath': filePath};
+    return <String, dynamic>{
+      'title': title,
+      'artist': artist,
+      'album': album,
+      'filePath': filePath,
+      if (duration != null) 'durationMs': duration!.inMilliseconds,
+      if (trackNumber != null) 'trackNumber': trackNumber,
+      if (albumArt != null &&
+          albumArt!.isNotEmpty &&
+          albumArt!.length <= _maxPersistedArtworkBytes)
+        'albumArt': base64Encode(albumArt!),
+    };
   }
 
   factory Song.fromJson(Map<String, dynamic> json) {
+    Uint8List? art;
+    final rawArt = json['albumArt'];
+    if (rawArt is String && rawArt.isNotEmpty) {
+      try {
+        art = base64Decode(rawArt);
+      } catch (_) {
+        art = null;
+      }
+    }
+    final ms = json['durationMs'];
+    final durationMs = ms is num ? ms.toInt() : int.tryParse('$ms');
     return Song(
-      title: json['title'],
-      artist: json['artist'],
-      filePath: json['filePath'],
+      title: (json['title'] ?? '未知歌曲').toString(),
+      artist: (json['artist'] ?? '未知歌手').toString(),
+      album: (json['album'] ?? '未知专辑').toString(),
+      filePath: (json['filePath'] ?? '').toString(),
+      albumArt: art,
+      duration: (durationMs != null && durationMs > 0)
+          ? Duration(milliseconds: durationMs)
+          : null,
+      trackNumber: json['trackNumber'] is num
+          ? (json['trackNumber'] as num).toInt()
+          : null,
     );
   }
 }

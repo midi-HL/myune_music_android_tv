@@ -58,7 +58,7 @@ Android TV 启动器共用；TV 桌面另有 320×180 横幅。
 | 上游原文说明 | [UPSTREAM_README.md](UPSTREAM_README.md)（原样保留） |
 | **本改版开源仓库** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | 本改版协议 | **Apache License 2.0**（与上游一致） |
-| 本改版版本 | `1.1.0`（见 `lib/tv/tv_app_info.dart`） |
+| 本改版版本 | `1.1.1`（见 `lib/tv/tv_app_info.dart`） |
 
 本仓库**保留了上游完整提交历史**（未 squash、未改写），所有改版内容以新增提交与 tag 形式记录，
 可随时回滚。改动清单见 [NOTICE](NOTICE) 与 [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)。
@@ -286,6 +286,7 @@ keystore 与密码不进入仓库。
 | `tv-v2-focus-fix` / `tv-v3-focus-fix` / `tv-v4-focus-fix` | 各轮 TV 焦点修复版本 |
 | `v1.0.0` | 首个开源化版本（关于页 / 检查更新 / 三 ABI，debug 签名） |
 | `v1.1.0` | 网络媒体（WebDAV / FTP / 哔哩哔哩）+ 固定 release 签名版本 |
+| `v1.1.1` | 网络媒体播放修复、哔哩哔哩分页重构、历史播放 / 收藏、老旧音频格式兼容 |
 
 ```bash
 git checkout tv-v4-focus-fix      # 回到某个锚点

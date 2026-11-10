@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -89,28 +90,41 @@ class LocalStreamProxy {
   }
 
   static bool isProxyUrl(String url) {
-    return url.startsWith('http://127.0.0.1:') &&
-        url.contains('/$token/');
+    return url.startsWith('http://127.0.0.1:') && url.contains('/$token/');
   }
+
+  /// 是否为 B 站媒体标识 `bilibili:{bvid}:{cid}[:{mode}]`。
+  /// 老队列 / 外部传入的标识不能直接交给 `Media()`，需要先规范化成代理 URL。
+  static bool isMediaId(String value) =>
+      value.startsWith('bilibili:') || value.startsWith('nas:');
 
   /// 网络硬盘 / 共享网盘的目标。
   ///
   /// 元数据一起编码进 URL：应用重启后播放队列里保存的仍是这个 URL，
-  /// `RemoteMediaRegistry` 可以直接从 URL 还原标题/歌手，不需要重新联网枚举。
+  /// `RemoteMediaRegistry` 可以直接从 URL 还原标题/歌手/封面，不需要重新联网枚举。
+  /// [proto] / [mediaId] 显式写入，避免协议与媒体标识在传递中丢失或错位。
   String urlForNas(
     String sourceId,
     String remotePath, {
     String? title,
     String? artist,
     String? album,
+    int? durationSeconds,
+    String? artworkUrl,
+    String? proto,
+    String? mediaId,
   }) {
     return urlFor(<String, dynamic>{
       'k': 'nas',
       's': sourceId,
       'p': remotePath,
+      if (proto != null && proto.isNotEmpty) 'proto': proto,
+      if (mediaId != null && mediaId.isNotEmpty) 'id': mediaId,
       if (title != null && title.isNotEmpty) 't': title,
       if (artist != null && artist.isNotEmpty) 'r': artist,
       if (album != null && album.isNotEmpty) 'l': album,
+      if (durationSeconds != null && durationSeconds > 0) 'd': durationSeconds,
+      if (artworkUrl != null && artworkUrl.isNotEmpty) 'u': artworkUrl,
     });
   }
 
@@ -123,9 +137,13 @@ class LocalStreamProxy {
     String? artist,
     String? album,
     int? durationSeconds,
+    String? artworkUrl,
+    String? mediaId,
   }) {
     return urlFor(<String, dynamic>{
       'k': 'bili',
+      'proto': 'bilibili',
+      'id': mediaId ?? 'bilibili:$bvid:$cid',
       'b': bvid,
       'c': cid,
       'm': mode.name,
@@ -133,6 +151,7 @@ class LocalStreamProxy {
       if (artist != null && artist.isNotEmpty) 'r': artist,
       if (album != null && album.isNotEmpty) 'l': album,
       if (durationSeconds != null && durationSeconds > 0) 'd': durationSeconds,
+      if (artworkUrl != null && artworkUrl.isNotEmpty) 'u': artworkUrl,
     });
   }
 
@@ -141,9 +160,134 @@ class LocalStreamProxy {
     if (port == null) {
       throw StateError('本机流代理尚未启动，请重启应用');
     }
-    final payload = base64UrlEncode(utf8.encode(jsonEncode(target)))
+    final normalized = normalizeTarget(target);
+    final payload = base64UrlEncode(utf8.encode(jsonEncode(normalized)))
         .replaceAll('=', '');
     return 'http://127.0.0.1:$port/$token/$payload';
+  }
+
+  /// 解码 token 并规范化。同时兼容两类历史 / 外部输入：
+  ///   * base64url(JSON)（当前版本生成的代理 URL）；
+  ///   * 裸媒体标识 `bilibili:BVxxx:123[:audio]`（旧队列 / 第三方传入）。
+  static Map<String, dynamic>? decodeToken(String rawToken) {
+    Map<String, dynamic>? decoded;
+    try {
+      final text = utf8.decode(
+        base64Url.decode(base64Url.normalize(rawToken)),
+      );
+      final parsed = jsonDecode(text);
+      if (parsed is Map<String, dynamic>) decoded = parsed;
+    } catch (_) {
+      decoded = null;
+    }
+    if (decoded == null && isMediaId(rawToken)) {
+      decoded = <String, dynamic>{'id': rawToken};
+    }
+    if (decoded == null) return null;
+    return normalizeTarget(decoded);
+  }
+
+  /// 把各种别名 / 旧写法统一成规范 target。
+  ///
+  /// 这是「媒体标识、协议与 audio/video 类型映射异常」的集中修正点：
+  /// 兼容 kind 别名、字段别名、`bilibili:{bvid}:{cid}` 媒体标识、
+  /// `proto` 协议字段，以及 audio / video 的多种写法。
+  static Map<String, dynamic> normalizeTarget(Map<String, dynamic> raw) {
+    final t = <String, dynamic>{...raw};
+
+    void alias(String canonical, List<String> others) {
+      if (t.containsKey(canonical) &&
+          t[canonical] != null &&
+          t[canonical].toString().isNotEmpty) {
+        return;
+      }
+      for (final key in others) {
+        final value = t[key];
+        if (value != null && value.toString().isNotEmpty) {
+          t[canonical] = value;
+          return;
+        }
+      }
+    }
+
+    // 1) 流目标类型（kind）
+    var kind = (t['k'] ?? t['kind'] ?? t['type'] ?? '')
+        .toString()
+        .toLowerCase()
+        .trim();
+    final idRaw = (t['id'] ?? t['mediaId'] ?? t['media'] ?? t['mid'] ?? '')
+        .toString()
+        .trim();
+    if (kind.isEmpty && idRaw.startsWith('bilibili:')) kind = 'bili';
+    if (kind.isEmpty && idRaw.startsWith('nas:')) kind = 'nas';
+    switch (kind) {
+      case 'nas':
+      case 'webdav':
+      case 'dav':
+      case 'ftp':
+      case 'http':
+      case 'https':
+      case 'network':
+      case 'share':
+        if (!t.containsKey('proto') && kind != 'nas') {
+          t['proto'] = kind;
+        }
+        kind = 'nas';
+        break;
+      case 'bili':
+      case 'bilibili':
+      case 'b':
+      case 'bv':
+      case 'b23':
+        kind = 'bili';
+        break;
+    }
+    t['k'] = kind;
+
+    // 2) 字段别名
+    alias('s', <String>['sourceId', 'src', 'source', 'sid']);
+    alias('p', <String>['path', 'href', 'remotePath', 'file', 'url']);
+    alias('b', <String>['bvid', 'bv', 'vid']);
+    alias('c', <String>['cid', 'pageId', 'page_id']);
+    alias('m', <String>['mode', 'stream', 'streamType', 'quality']);
+    alias('t', <String>['title', 'name']);
+    alias('r', <String>['artist', 'author', 'up', 'singer']);
+    alias('l', <String>['album']);
+    alias('d', <String>['duration', 'durationSeconds', 'len']);
+    alias('u', <String>['cover', 'art', 'artwork', 'pic', 'coverUrl']);
+    alias('proto', <String>['scheme', 'protocol', 'pcol']);
+    alias('id', <String>['mediaId', 'media', 'mid']);
+
+    // 3) 媒体标识 `bilibili:{bvid}:{cid}[:{mode}]` 补全参数
+    final id = (t['id'] ?? '').toString().trim();
+    if (id.startsWith('bilibili:')) {
+      final parts = id.split(':');
+      if (parts.length >= 3) {
+        t['k'] = 'bili';
+        t.putIfAbsent('b', () => parts[1]);
+        final cid = int.tryParse(parts[2]) ?? t['c'];
+        if (cid != null) t['c'] = cid;
+        if (parts.length >= 4 && !t.containsKey('m')) t['m'] = parts[3];
+      }
+    }
+
+    // 4) audio / video 类型别名统一成枚举名
+    final mode = (t['m'] ?? '').toString().toLowerCase().trim();
+    const videoAliases = <String>{
+      'video', 'v', '1', 'durl', 'flv', 'mp4', 'progressive', 'true',
+    };
+    t['m'] = videoAliases.contains(mode) ? 'video' : 'audio';
+
+    // 5) 协议字段规范化（仅作元数据，实际客户端以 RemoteSource.type 为准）
+    final proto = (t['proto'] ?? '').toString().toLowerCase().trim();
+    if (kind == 'bili') {
+      t['proto'] = 'bilibili';
+    } else if (proto == 'ftp' || proto == 'ftps') {
+      t['proto'] = 'ftp';
+    } else {
+      t['proto'] = 'webdav';
+    }
+    return t;
   }
 
   RemoteStreamOpener _resolve(Map<String, dynamic> target) {
@@ -156,7 +300,7 @@ class LocalStreamProxy {
       return (int? start, int? end) =>
           _openBili(target, start: start, end: end);
     }
-    throw StateError('未知的流目标类型：$kind');
+    throw StateError('未知的流目标类型：$kind（target=$target）');
   }
 
   Future<RemoteStreamResult> _openNas(
@@ -171,6 +315,8 @@ class LocalStreamProxy {
     }
     final path = target['p']?.toString() ?? '';
     if (path.isEmpty) throw StateError('远程文件路径为空');
+    // 以配置里的协议为唯一可信来源；URL 中的 proto 字段只作元数据，
+    // 避免别名 / 旧数据把 WebDAV 请求错发到 FTP 端口。
     if (source.type == RemoteSourceType.webdav) {
       return WebDavClient(source).open(path, start: start, end: end);
     }
@@ -183,9 +329,10 @@ class LocalStreamProxy {
     int? end,
   }) async {
     final bvid = target['b']?.toString() ?? '';
-    final cid = (target['c'] as num?)?.toInt() ??
-        int.tryParse(target['c']?.toString() ?? '') ??
-        0;
+    final cidRaw = target['c'];
+    final cid = (cidRaw is num)
+        ? cidRaw.toInt()
+        : int.tryParse(cidRaw?.toString() ?? '') ?? 0;
     final mode = target['m']?.toString() == 'video'
         ? BiliStreamMode.video
         : BiliStreamMode.audio;
@@ -216,6 +363,7 @@ class LocalStreamProxy {
         contentLength: response.contentLength,
         requestedStart: start,
         requestedEnd: end,
+        upstreamPartial: response.statusCode == 206,
       );
       return RemoteStreamResult(
         bytes: limitByteStream(response.stream, info.limit),
@@ -253,15 +401,8 @@ class LocalStreamProxy {
         return;
       }
 
-      Map<String, dynamic> target;
-      try {
-        final decoded = utf8.decode(
-          base64Url.decode(base64Url.normalize(segments[1])),
-        );
-        final parsed = jsonDecode(decoded);
-        if (parsed is! Map<String, dynamic>) throw const FormatException();
-        target = parsed;
-      } catch (_) {
+      final target = decodeToken(segments[1]);
+      if (target == null || target['k'] == null || target['k'] == '') {
         response.statusCode = HttpStatus.badRequest;
         await response.close();
         return;
@@ -287,29 +428,62 @@ class LocalStreamProxy {
       opened = await _resolve(target)(start, end);
       var result = opened;
 
-      // 上游若不给总长度（例如 Content-Range: bytes 0-999/*、FTP SIZE 不支持），
-      // 就无法构造合法的 Content-Range。此时若仍按 Range 起点返回，会把媒体
-      // 截成一小段并错误地用 200 告诉 mpv「文件就这么大」。改为关掉这次带
-      // Range 的流、重新从 0 顺序拉，用不带 Content-Length 的 200 流式返回。
-      final bool forceFull = rangeHeader != null && result.totalLength == null;
-      if (forceFull) {
+      // 上游不给总长度时无法构造合法 Content-Range。关掉这次带 Range 的流，
+      // 重新从 0 无 Range 拉；若仍拿不到长度，就退化为不带 Range 语义的
+      // 200 顺序流（完整、从 0 开始），避免给 mpv 一个截断的 206。
+      bool sequentialFallback = false;
+      if (rangeHeader != null && result.totalLength == null) {
         await result.close?.call();
         opened = await _resolve(target)(null, null);
         result = opened;
+        if (result.totalLength == null) sequentialFallback = true;
       }
 
+      final int? effectiveStart = sequentialFallback ? null : start;
+      final int? effectiveEnd = sequentialFallback ? null : end;
       final total = result.totalLength;
+
+      // 上游忽略了 Range（返回完整文件、起点为 0）而客户端请求了非零起点：
+      // 在代理侧真正跳过起点之前的字节，再按终点截断，得到合法 206。
+      // 旧实现会把「从 0 开始」的字节谎报成指定区间，mpv 拖动进度后
+      // 收到错位数据，报 MpvEndFileError(code:-13, loading failed)。
+      if (!sequentialFallback &&
+          effectiveStart != null &&
+          effectiveStart > 0 &&
+          result.servedStart == 0) {
+        int? servedEnd = effectiveEnd ??
+            (total != null && total > 0 ? total - 1 : null);
+        if (total != null && servedEnd != null && servedEnd > total - 1) {
+          servedEnd = total - 1;
+        }
+        Stream<List<int>> stream = skipByteStream(result.bytes, effectiveStart);
+        if (servedEnd != null && servedEnd >= effectiveStart) {
+          stream = limitByteStream(stream, servedEnd - effectiveStart + 1);
+        }
+        result = RemoteStreamResult(
+          bytes: stream,
+          totalLength: total,
+          servedStart: effectiveStart,
+          servedEnd: servedEnd,
+          contentType: result.contentType,
+          close: result.close,
+        );
+      }
+
       var servedEnd = result.servedEnd;
       if (servedEnd == null && total != null && total > 0) {
         servedEnd = total - 1;
       }
-      // 上游长度未知时无法给出合法的 Content-Range，退回 200 顺序流，
-      // 避免给 mpv 一个不完整的 206 响应。
       final isPartial =
-          rangeHeader != null && total != null && !forceFull;
+          !sequentialFallback && rangeHeader != null && total != null;
       response.statusCode =
           isPartial ? HttpStatus.partialContent : HttpStatus.ok;
-      response.headers.set('Accept-Ranges', 'bytes');
+      response.headers.set(
+        'Accept-Ranges',
+        (isPartial || (total != null && !sequentialFallback))
+            ? 'bytes'
+            : 'none',
+      );
       response.headers.set('Cache-Control', 'no-store');
       if (result.contentType != null) {
         try {
@@ -345,7 +519,15 @@ class LocalStreamProxy {
         await result.close?.call();
         opened = null;
       }
-    } catch (_) {
+    } catch (error, stack) {
+      // 这里过去会静默返回 502 空正文，mpv 只会报 loading failed，
+      // 无法定位是鉴权、协议、媒体标识还是 CDN 的问题。写出诊断日志。
+      developer.log(
+        '流代理请求失败：${request.method} ${request.uri} -> $error',
+        name: 'StarNoteProxy',
+        error: error,
+        stackTrace: stack,
+      );
       try {
         await opened?.close?.call();
       } catch (_) {}

@@ -2,7 +2,7 @@
 
 > 本文件是回档后的完整交接说明。代码基线按用户更正后的要求回到 2026-11-06 07:13 的 `558a71f`（11 点左右仓库里的版本、也是 `a28f2c9` 的前一个版本），仅额外接入 64 位 / 32 位双 ABI 构建；12:13 之后所有 UI、缩放、横屏、密度、原生视口 DPI、挖孔主题改动均已撤销。
 >
-> **当前状态（2026-11-09，v1.1.0）：以下第 1–12 节是 2026-11-06 回档阶段的「历史阶段记录」，仅作为审计轨迹保留，不代表当前实现。** 其中关于「debug 签名」「仓库保持 private」「四个 secrets 可选」「两 ABI」等描述均已过期：仓库 `midi-HL/myune_music_android_tv` 已转 public，首发 `v1.0.0` 后本轮 `v1.1.0` 已切换为**固定 release 签名**、CI 三 ABI、新增网络媒体（WebDAV / FTP / 哔哩哔哩）。各轮演进以第 13–18 节为准，尤其第 18 节为最新状态；历史章节中的旧结论不要直接套用到当前代码。
+> **当前状态（2026-11-09，v1.1.1）：以下第 1–12 节是 2026-11-06 回档阶段的「历史阶段记录」，仅作为审计轨迹保留，不代表当前实现。** 其中关于「debug 签名」「仓库保持 private」「四个 secrets 可选」「两 ABI」等描述均已过期：仓库 `midi-HL/myune_music_android_tv` 已转 public，首发 `v1.0.0` 后 `v1.1.0` 已切换为**固定 release 签名**、CI 三 ABI、新增网络媒体（WebDAV / FTP / 哔哩哔哩）；`v1.1.1` 为网络媒体播放修复与电视端 UI 重构版本。各轮演进以第 13–19 节为准，尤其第 19 节为最新状态；历史章节中的旧结论不要直接套用到当前代码。
 
 ## 1. 项目是什么
 
@@ -611,3 +611,86 @@ Rust targets 增加 `x86_64-linux-android`。`mpv_audio_kit` 的 `abiFilters` �
 
 - 本轮为 `4ca34a4` 之后的提交，tag `v1.1.0`。回滚：`git revert <本轮提交>`，或 checkout 之前的 tag / 分支；Release 与 APK 属远端状态，需单独删除。
 - 注意签名切换的单向影响：`v1.0.0` 为 debug 证书，`v1.1.0` 起为固定 release 证书；若用户从 `v1.0.0` 升级需卸载一次旧版，反向回退到 debug 包同样需要卸载。
+
+---
+
+## 19. 网络媒体播放修复、电视端 UI 重构与格式兼容（2026-11-09，v1.1.1）
+
+### 19.1 本轮目标
+
+用户基于 `v1.1.0` 真机使用反馈提出：WebDAV 把文件夹误判成「无后缀文件」导致无法进入目录；WebDAV / 哔哩哔哩播放分别报
+`MpvEndFileError(reason: error, code: -13, message: loading failed)` 与「歌曲文件不存在」并附带媒体标识；媒体标识、协议与
+`audio/video` 类型之间的映射异常；自动获取元数据与封面失效。同时要求重排电视端界面、新增历史播放 / 收藏、兼容常见与老旧音频格式。
+用户明确「一并检查 FTP 逻辑」「确保两处自动获取、正常显示元数据与封面」「列表仍只显示文件夹与音频文件，不混入视频文件」。
+
+延续的硬约束：直接改代码、不做真机 / 模拟器 / adb 控制、不弹 Git 账号选择框、固定 release 签名不变、所有界面遥控器可达、软键盘可唤出、B 站扫码登录置于更深层。
+
+### 19.2 播放失败根因与修复
+
+1. **WebDAV 目录误判**：旧 `PROPFIND` 解析只认 `<d:collection/>` 自闭合标签。改为先解析 `resourcetype` 块再用
+   `_collectionTagRe` 匹配任意前缀 / 属性 / 大小写 / 带命名空间的开标签，最后用 href 尾部 `/` 兜底；新增 `displayname` 优先显示名。
+2. **子目录内文件 GET 错路径**：`_parsePropfind()` 现在把每个 href 用 `requestedDir.resolve()` 解析成**绝对 URL** 存进
+   `RemoteEntry.path`（并对未编码中文 href 加 `Uri.encodeFull` 兜底），避免进入子目录后相对配置根目录二次解析。
+3. **上游忽略 Range 时谎报 206**：新增 `skipByteStream()`；`describeHttpRange()` 增加 `upstreamPartial` 参数区分真 206 /
+   无 `Content-Range` 的 206 / 忽略 Range 的 200；代理侧在 `servedStart == 0` 且请求起点 > 0 时真正跳过起点前字节并按终点截断，
+   再合法回 206。这是拖动进度后 `loading failed` 的直接根因。
+4. **「歌曲文件不存在」误报**：`LyricsHandler.loadLyricsForSong()` 对本机代理 URL / 裸 `bilibili:` 媒体标识直接跳过全部本地文件类
+   歌词来源（只保留可选的在线歌词）；`_parseSongMetadata()` / `getCurrentSongDetails()` / `_verifySongMetadataInBackground()` /
+   `_coverWorker()` 全部加网络媒体拦截，杜绝把 URL 交给 `File.exists()` 或 Rust `readAudioInfo()`。
+5. **媒体标识 / 协议 / audio-video 映射**：`LocalStreamProxy.normalizeTarget()` 统一 kind 别名（`nas/webdav/ftp/bili/bilibili` 等）、
+   字段别名、`bilibili:{bvid}:{cid}[:{mode}]` 裸标识补全、audio/video 别名与 `proto` 规范化；`_openNas()` 以 `RemoteSource.type`
+   为唯一可信协议来源，避免 WebDAV 请求错发到 FTP 端口。
+6. **封面与元数据**：`RemoteMediaRegistry` 新增 `artworkUrlFor()` / `artworkFor()` / `registerArtwork()` / `cachedArtwork()`；
+   `_prepareSongForPlayback()` 对网络媒体按需下载封面回填；`Song.toJson()/fromJson()` 现在持久化 `album` / `durationMs` /
+   `albumArt` / `trackNumber`；网盘目录自动发现 `cover.jpg` / `folder.jpg` / `albumart.png` 等并编码进代理 URL；
+   `歌手 - 标题.mp3` 自动拆出歌手。
+7. **FTP**：`REST` 改为紧邻 `RETR`（先 `PASV` 建数据连接，再 `REST`，最后 `RETR`），避免部分 NAS 在 PASV 后重置重启点；
+   PASV 返回 `0.0.0.0` / 回环 / RFC1918 私网地址且与控制连接对端不同时直接改用控制连接对端，省掉 15 秒超时。
+8. **代理端口漂移**：重启后若 18765 被占用会顺延端口，旧队列 / 收藏 / 历史里的 URL 会连不上。新增
+   `RemoteMediaRegistry.normalizePlayablePath()` 按原 token 改写端口并迁移注册表 / 封面缓存；`lookup()`、`BiliLibraryStore.load()`、
+   `playFromDynamicList()`、`addSongsToPlayingQueue()` 与 `AudioService.playSong()/playSongGapless()/replaceNext()` 统一收敛到当前端口。
+
+### 19.3 电视端 UI 重构
+
+- **哔哩哔哩页**：顶部压缩为「一行工具条（搜索 / 打开 BV 号 / 更多 / 紧凑上一页·下一页）+ 一行分区选项栏」；删除重复的
+  「哔哩哔哩」标题、说明文案、含义不明的「点击」提示与平铺功能；主体默认展示推荐（WBI 推荐 → 热门 → 排行榜逐级回退）；
+  「更多」内放搜索历史、账号与登录（已登录显示「已登录」）、流类型、清空历史播放，扫码登录再往下一层。
+- **历史播放 / 收藏**：新增 `BiliLibraryStore`（普通 `Song` 列表持久化），独立分区栏；搜索 / 推荐结果用星标收藏；收藏与历史点击即播，
+  左侧 `RemoteArtwork` 直接显示封面，列表内不显示额外「更多」菜单。
+- **网盘页**：两态布局，进入指定网盘后隐藏配置面板与常驻「网络音乐」「编辑」入口，文件列表占满可用区域，只用「上一步」逐级返回，
+  退到根后再按一次回到源列表。
+- **焦点回归修复**：`IndexedStack` 子页里重新出现的 `autofocus: true` 会抢初始焦点，已删除（只保留主标签唯一初始焦点与对话框内 autofocus），
+  与第 18.10 节第 11 条的结论保持一致。
+
+### 19.4 格式兼容
+
+`RemoteEntry` 改用 `Set<String>` 定义 `audioExtensions`（MPEG 层 1/2/3、FLAC/APE/WavPack/TTA/TAK/Shorten/DSD、PCM/AIFF/CAF、
+AAC/ALAC、Ogg/Opus/Speex、WMA/ASF、模块音乐、MIDI、AMR/RealAudio、AC3/E-AC3/DTS 等常见与老旧格式）与 `videoExtensions`。
+列表用 `isAudio` 过滤（目录 + 音频，不混入视频），「播放全部媒体」用 `isPlayableMedia` 含视频容器，由 mpv 以「仅音频播放」处理；
+`guessContentType()` 按扩展名给出精确 MIME，无法识别时返回 `application/octet-stream`。
+
+### 19.5 涉及文件
+
+- 新增：`lib/services/network/bili_library.dart`
+- 重写 / 大改：`webdav_client.dart`、`ftp_client.dart`、`local_stream_proxy.dart`、`remote_media_registry.dart`、
+  `remote_stream.dart`、`remote_entry.dart`、`bilibili_client.dart`、`network_media_service.dart`、
+  `bilibili_view.dart`、`network_sources_view.dart`、`tv_network_widgets.dart`
+- 局部修改：`playlist_models.dart`、`playlist_content_notifier.dart`、`lyrics_handler.dart`、
+  `audio_service.dart`、`network_media_page.dart`、`tv_app_info.dart`、中英 README、NOTICE、本文档
+
+### 19.6 静态复核与验收
+
+- 本机静态复核：`git diff --check`、Dart 词法括号 / 字符串平衡、相对 import 解析、pubspec 依赖、跨文件关键符号契约、
+  改动点断言，共 **42/42 ALL PASS**（17 个 Dart 文件）。
+- 复核 `dart:io` 源码（`http_impl.dart` / `http_headers.dart`）确认 `response.headers.contentLength = n` 会自动关闭
+  `chunkedTransferEncoding`，代理侧 200/206 + Content-Length 写法安全；HEAD 响应 `ignoreBody` 时不会因未写 body 报错。
+  排除该疑点后，`loading failed` 根因收敛到 Range 谎报与 href 二次解析。
+- **本机没有 Flutter / Dart CLI**，最终 Dart 编译与 APK 产物校验仍依赖 CI `flutter build apk --release`（三 ABI）。
+- TV 遥控器可达性复核：所有新增可交互项均为 `TvFocusHighlight`（支持 OK + 鼠标 / 触控）；对话框首个可选项 `autofocus`；
+  文本输入 `TextField(autofocus)` + 显式 `TextInput.show`；全局输入层在文本输入获焦时不劫持按键；扫码登录位于
+  「更多 → 账号与登录 → 扫码登录」。
+
+### 19.7 回滚
+
+- 本轮为 `603b86c` 之后的提交，tag `v1.1.1`。回滚：`git revert <本轮提交>`，或 checkout `v1.1.0`；
+  Release 与 APK 属远端状态，需单独删除。签名证书与 `v1.1.0` 相同，可直接覆盖安装或回退安装。
