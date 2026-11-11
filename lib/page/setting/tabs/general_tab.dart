@@ -155,7 +155,14 @@ class _GeneralTabState extends State<GeneralTab> {
                     ),
                   ],
                 ),
-                TvPointerOnlySlider(
+                TvAdjustableSlider(
+                  value: settings.androidUiScale,
+                  min: 0.55,
+                  max: 1.0,
+                  divisions: 9,
+                  onChanged: (value) {
+                    context.read<SettingsProvider>().setAndroidUiScale(value);
+                  },
                   child: Slider(
                     min: 0.55,
                     max: 1.0,

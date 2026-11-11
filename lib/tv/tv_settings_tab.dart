@@ -320,7 +320,12 @@ class _ScaleSlider extends StatelessWidget {
               Text(display),
             ],
           ),
-          TvPointerOnlySlider(
+          TvAdjustableSlider(
+            value: value,
+            min: min,
+            max: max,
+            divisions: divisions,
+            onChanged: onChanged,
             child: Slider(
               min: min,
               max: max,

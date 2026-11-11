@@ -4,8 +4,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import 'tv_device.dart';
-
 // Android TV 焦点导航层。
 //
 // 设计约束（依据真机回归结论）：
@@ -526,7 +524,10 @@ class TvPointerOnlySlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!TvDevice.isTv) return child;
+    // 所有 Android 设备都要包：大量电视盒子是普通 Android（isTv=false），
+    // 但同样只靠遥控器十字键操作。若在此处 return child，裸 Slider 会吞掉
+    // 四向键，方向键几何导航就会卡死在进度条上。这个 Focus 只禁用键盘焦点，
+    // 鼠标 / 触控拖动完全不受影响。
     return Focus(
       canRequestFocus: false,
       skipTraversal: true,
@@ -633,11 +634,16 @@ class _TvFocusHighlightState extends State<TvFocusHighlight> {
   }
 }
 
-// 设置类滑块：遥控器可达、可调值，同时「垂直方向」的方向键必须能离开，
-// 否则会像进度条一样把四个方向键全部吞掉。
-// 水平滑块：←/→ 调值，↑/↓ 交给全局几何导航移开焦点；
-// 竖直滑块：↑/↓ 调值，←/→ 交给全局几何导航移开焦点。
+// 设置类滑块：遥控器可达、可调值，同时「非调值方向」的方向键必须能离开，
+// 否则会像进度条一样把四个方向键全部吞掉（真机复现：聚焦「界面缩放」后
+// 按 ←/→/↑/↓ 数值不变、焦点也不动，遥控器卡死）。
+// 水平滑块：←/→ 调值，↑/↓ 移开焦点；竖直滑块反之。
 // 传入的 Slider 保持原样，鼠标 / 触控拖动依旧可用。
+//
+// 注意：本组件不能加 `if (!TvDevice.isTv) return child` 门控。普通 Android
+// 设备（含 MuMu / 手机 + 外接键盘或遥控器）上 main.dart 不挂载 TvFocusScope，
+// 裸露的 Flutter Slider 会把四向键吞掉却又不移动焦点；这里必须始终包装，
+// 并自己用 TvFocusController 做「移开焦点」，不依赖 TvFocusScope 是否挂载。
 class TvAdjustableSlider extends StatelessWidget {
   const TvAdjustableSlider({
     required this.child,
@@ -662,7 +668,6 @@ class TvAdjustableSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!TvDevice.isTv) return child;
     return Focus(
       canRequestFocus: true,
       skipTraversal: false,
@@ -675,15 +680,34 @@ class TvAdjustableSlider extends StatelessWidget {
           return KeyEventResult.ignored;
         }
         final key = event.logicalKey;
-        final increase = vertical
-            ? key == LogicalKeyboardKey.arrowUp
-            : key == LogicalKeyboardKey.arrowRight;
-        final decrease = vertical
-            ? key == LogicalKeyboardKey.arrowDown
-            : key == LogicalKeyboardKey.arrowLeft;
-        if (!increase && !decrease) {
-          // 其余方向键放行，交给 TvFocusScope 的几何导航移开焦点。
+        final isUp = key == LogicalKeyboardKey.arrowUp;
+        final isDown = key == LogicalKeyboardKey.arrowDown;
+        final isLeft = key == LogicalKeyboardKey.arrowLeft;
+        final isRight = key == LogicalKeyboardKey.arrowRight;
+        if (!isUp && !isDown && !isLeft && !isRight) {
           return KeyEventResult.ignored;
+        }
+
+        final increase = vertical ? isUp : isRight;
+        final decrease = vertical ? isDown : isLeft;
+        if (!increase && !decrease) {
+          // 非调值方向：直接按几何导航把焦点移到相邻控件。
+          // 严格方向找不到时放宽一次（方向不变），避免死角卡住。
+          final direction = isUp
+              ? TraversalDirection.up
+              : (isDown
+                  ? TraversalDirection.down
+                  : (isLeft
+                      ? TraversalDirection.left
+                      : TraversalDirection.right));
+          if (!TvFocusController.instance.moveFocus(direction, node)) {
+            TvFocusController.instance.moveFocus(
+              direction,
+              node,
+              relaxed: true,
+            );
+          }
+          return KeyEventResult.handled;
         }
         if (max <= min) return KeyEventResult.handled;
         final step = (max - min) / (divisions ?? 20);

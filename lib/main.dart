@@ -574,26 +574,32 @@ class _MyAppState extends State<MyApp> with TrayListener, WidgetsBindingObserver
           darkTheme: themeProvider.darkThemeData,
           themeMode: themeProvider.themeMode,
           builder: (context, materialAppChild) {
-            // Android TV：不做手机端的 0.72 缩放，也不做过扫描留白；
-            // 只挂统一输入层与焦点遍历策略，界面保持原样。
-            if (Platform.isAndroid && TvDevice.isTv) {
-              final tv = context.watch<TvSettings>();
-              return TvInputScope(
-                child: TvUiScaler(
+            if (Platform.isAndroid) {
+              // 方向键 / 遥控器输入层与几何焦点导航必须覆盖所有 Android 设备：
+              // 大量电视盒子是「普通 Android」（无 leanback、有触摸屏标记），
+              // 却完全靠遥控器十字键操作，TvDevice.isTv 会判为 false。
+              // 若只在 isTv 时挂 TvInputScope，这类设备上方向键走 Flutter
+              // 默认遍历，遇到 Slider 等控件会被吞掉、焦点乱跳或卡死。
+              // 焦点层只处理按键，不影响鼠标 / 触控。
+              Widget scaled;
+              if (TvDevice.isTv) {
+                // 真 Android TV：不做手机端缩放、不做过扫描留白。
+                final tv = context.watch<TvSettings>();
+                scaled = TvUiScaler(
                   scale: tv.uiScale,
                   child: materialAppChild!,
-                ),
-              );
-            }
-            // Android（手机）上去掉窗口拖拽缩放与全局快捷键，并做应用内整体缩放。
-            if (Platform.isAndroid) {
-              final uiScale = context
-                  .watch<SettingsProvider>()
-                  .androidUiScale;
-              return _AndroidUiScaler(
-                scale: uiScale,
-                child: materialAppChild!,
-              );
+                );
+              } else {
+                // 普通 Android（手机 / 电视盒子）：保留应用内整体缩放。
+                final uiScale = context
+                    .watch<SettingsProvider>()
+                    .androidUiScale;
+                scaled = _AndroidUiScaler(
+                  scale: uiScale,
+                  child: materialAppChild!,
+                );
+              }
+              return TvInputScope(child: scaled);
             }
             return DragToResizeArea(child: Hotkeys(child: materialAppChild!));
           },

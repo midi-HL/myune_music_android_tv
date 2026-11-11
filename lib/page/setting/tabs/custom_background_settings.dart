@@ -296,7 +296,12 @@ class _CustomBackgroundSettingsState extends State<CustomBackgroundSettings> {
       subtitle: Row(
         children: [
           Expanded(
-            child: TvPointerOnlySlider(
+            child: TvAdjustableSlider(
+              value: clamped,
+              min: 0.0,
+              max: 1.0,
+              divisions: 100,
+              onChanged: onChanged,
               child: Slider(
                 min: 0.0,
                 max: 1.0,
@@ -334,7 +339,14 @@ class _CustomBackgroundSettingsState extends State<CustomBackgroundSettings> {
       subtitle: Row(
         children: [
           Expanded(
-            child: TvPointerOnlySlider(
+            child: TvAdjustableSlider(
+              value: value,
+              min: min,
+              max: max,
+              divisions: ((max - min) * 100).round(),
+              onChanged: (v) {
+                context.read<SettingsProvider>().setBackgroundMaskOpacity(v);
+              },
               child: Slider(
                 min: min,
                 max: max,
@@ -370,7 +382,14 @@ class _CustomBackgroundSettingsState extends State<CustomBackgroundSettings> {
       subtitle: Row(
         children: [
           Expanded(
-            child: TvPointerOnlySlider(
+            child: TvAdjustableSlider(
+              value: value.clamp(0.0, 60.0),
+              min: 0.0,
+              max: 60.0,
+              divisions: 60,
+              onChanged: (v) {
+                context.read<SettingsProvider>().setBackgroundImageBlur(v);
+              },
               child: Slider(
                 min: 0.0,
                 max: 60.0,

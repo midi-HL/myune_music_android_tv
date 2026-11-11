@@ -115,7 +115,16 @@ class LyricsSettingsDrawer extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          TvPointerOnlySlider(
+                          TvAdjustableSlider(
+                            value: settings.fontSize,
+                            min: 12.0,
+                            max: 32.0,
+                            divisions: 20,
+                            onChanged: (value) {
+                              context.read<SettingsProvider>().setFontSize(
+                                value,
+                              );
+                            },
                             child: Slider(
                               value: settings.fontSize,
                               min: 12.0,
@@ -153,7 +162,16 @@ class LyricsSettingsDrawer extends StatelessWidget {
                 ),
 
                 const SizedBox(height: 4),
-                TvPointerOnlySlider(
+                TvAdjustableSlider(
+                  value: settings.lyricFontWeight.toDouble(),
+                  min: 100,
+                  max: 900,
+                  divisions: 16,
+                  onChanged: (value) {
+                    context.read<SettingsProvider>().setLyricFontWeight(
+                      value.round(),
+                    );
+                  },
                   child: Slider(
                     value: settings.lyricFontWeight.toDouble(),
                     min: 100,
@@ -186,7 +204,16 @@ class LyricsSettingsDrawer extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          TvPointerOnlySlider(
+                          TvAdjustableSlider(
+                            value: settings.lyricVerticalSpacing,
+                            min: 0.0,
+                            max: 20.0,
+                            divisions: 20,
+                            onChanged: (value) {
+                              context
+                                  .read<SettingsProvider>()
+                                  .setLyricVerticalSpacing(value);
+                            },
                             child: Slider(
                               value: settings.lyricVerticalSpacing,
                               min: 0.0,
@@ -220,7 +247,16 @@ class LyricsSettingsDrawer extends StatelessWidget {
                     ignoring: !settings.enableLyricBlur,
                     child: Opacity(
                       opacity: settings.enableLyricBlur ? 1.0 : 0.5,
-                      child: TvPointerOnlySlider(
+                      child: TvAdjustableSlider(
+                        value: settings.lyricBlurStrength,
+                        min: 1.0,
+                        max: 4.0,
+                        divisions: 12,
+                        onChanged: (value) {
+                          context
+                              .read<SettingsProvider>()
+                              .setLyricBlurStrength(value);
+                        },
                         child: Slider(
                           value: settings.lyricBlurStrength,
                           min: 1.0,

@@ -230,7 +230,13 @@ class ThemeSelectionScreen extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              child: TvPointerOnlySlider(
+                              child: TvAdjustableSlider(
+                                value: currentHue,
+                                min: 0.0,
+                                max: 360.0,
+                                onChanged: (newValue) {
+                                  hueNotifier.value = newValue;
+                                },
                                 child: Slider(
                                   value: currentHue,
                                   min: 0.0,
