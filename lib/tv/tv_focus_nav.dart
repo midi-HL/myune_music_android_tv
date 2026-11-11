@@ -42,6 +42,15 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
     // 这里必须明确放行，返回 null 会被 Shortcuts 当成 handled 吞掉按键。
     if (_isEditableFocus(node)) return KeyEventResult.ignored;
 
+    // 设置类滑块（TvAdjustableSlider）自己用内层 Shortcuts/Actions 处理
+    // 四个方向键（调值方向调值、其余方向主动 moveFocus 离开）。本 Action
+    // 挂在 TvFocusScope 更外层，若也执行几何导航会出现「焦点在滑块上按 ←
+    // 不调值、反而跳到上方一行」（MuMu 真机复现）。因此这里直接放行，
+    // 把方向键完全交给滑块自己的内层处理，避免两套逻辑重复驱动焦点。
+    if (node.debugLabel == 'tv-adjustable-slider') {
+      return KeyEventResult.ignored;
+    }
+
     // 严格几何方向优先；若该方向上确实没有同行 / 同列候选，再放宽对齐
     // 约束重试一次（方向仍然严格不变），避免焦点卡在死角里按不动。
     if (!TvFocusController.instance.moveFocus(intent.direction, node)) {
@@ -706,100 +715,50 @@ class TvAdjustableSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 关键点：TvFocusScope 的 Shortcuts/Actions 挂在更外层，方向键会先被
-    // 它截获成 TvDirectionalFocusIntent（实测：焦点在滑块上按 ← 直接跳到
-    // 上方一行，而不是调值）。因此在滑块内层再放一层 Shortcuts/Actions，
-    // 四个方向键全部由这里处理并返回 handled，外层几何导航不再收到：
+    // 单一处理路径：四个方向键全部由这个 Focus 的 onKeyEvent 处理并返回
+    // handled，不会冒泡到外层 TvFocusScope 的几何导航（后者已在
+    // TvDirectionalFocusAction 里对 debugLabel='tv-adjustable-slider' 放行）。
     //   * 调值方向（水平 ←/→，竖直 ↑/↓）→ _adjust
-    //   * 非调值方向 → _leave 主动按几何把焦点移到相邻控件
-    // 这样既不吞键、又能调值与离开，且不改动全局导航逻辑。
-    final bool adjustOnHorizontal = !vertical;
-    final shortcuts = <ShortcutActivator, _SliderKeyIntent>{
-      const SingleActivator(LogicalKeyboardKey.arrowLeft):
-          _SliderKeyIntent(adjustOnHorizontal
-              ? _SliderOp.decrease
-              : _SliderOp.leaveLeft),
-      const SingleActivator(LogicalKeyboardKey.arrowRight):
-          _SliderKeyIntent(adjustOnHorizontal
-              ? _SliderOp.increase
-              : _SliderOp.leaveRight),
-      const SingleActivator(LogicalKeyboardKey.arrowUp):
-          _SliderKeyIntent(adjustOnHorizontal
-              ? _SliderOp.leaveUp
-              : _SliderOp.increase),
-      const SingleActivator(LogicalKeyboardKey.arrowDown):
-          _SliderKeyIntent(adjustOnHorizontal
-              ? _SliderOp.leaveDown
-              : _SliderOp.decrease),
-    };
-
-    return Actions(
-      actions: <Type, Action<Intent>>{
-        _SliderKeyIntent: CallbackAction<_SliderKeyIntent>(
-          onInvoke: (_SliderKeyIntent intent) {
-            final node = FocusManager.instance.primaryFocus;
-            switch (intent.op) {
-              case _SliderOp.increase:
-                _adjust(true);
-                break;
-              case _SliderOp.decrease:
-                _adjust(false);
-                break;
-              case _SliderOp.leaveUp:
-                if (node != null) {
-                  _leave(TraversalDirection.up, node);
-                }
-                break;
-              case _SliderOp.leaveDown:
-                if (node != null) {
-                  _leave(TraversalDirection.down, node);
-                }
-                break;
-              case _SliderOp.leaveLeft:
-                if (node != null) {
-                  _leave(TraversalDirection.left, node);
-                }
-                break;
-              case _SliderOp.leaveRight:
-                if (node != null) {
-                  _leave(TraversalDirection.right, node);
-                }
-                break;
-            }
-            return true;
-          },
-        ),
+    //   * 其余方向 → _leave 主动按几何把焦点移到相邻控件
+    // 这样只有一条路径，绝不会出现「一次按键调两格」或「焦点被抢走」。
+    // Slider 内部会吞键的 Focus / Shortcuts 退出焦点链；鼠标 / 触控不受影响。
+    return Focus(
+      debugLabel: 'tv-adjustable-slider',
+      canRequestFocus: true,
+      skipTraversal: false,
+      descendantsAreFocusable: false,
+      descendantsAreTraversable: false,
+      onKeyEvent: (FocusNode node, KeyEvent event) {
+        if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+          return KeyEventResult.ignored;
+        }
+        final key = event.logicalKey;
+        final isUp = key == LogicalKeyboardKey.arrowUp;
+        final isDown = key == LogicalKeyboardKey.arrowDown;
+        final isLeft = key == LogicalKeyboardKey.arrowLeft;
+        final isRight = key == LogicalKeyboardKey.arrowRight;
+        if (!isUp && !isDown && !isLeft && !isRight) {
+          return KeyEventResult.ignored;
+        }
+        final increase = vertical ? isUp : isRight;
+        final decrease = vertical ? isDown : isLeft;
+        if (increase || decrease) {
+          _adjust(increase);
+          return KeyEventResult.handled;
+        }
+        final direction = isUp
+            ? TraversalDirection.up
+            : (isDown
+                ? TraversalDirection.down
+                : (isLeft
+                    ? TraversalDirection.left
+                    : TraversalDirection.right));
+        _leave(direction, node);
+        return KeyEventResult.handled;
       },
-      child: Shortcuts(
-        shortcuts: shortcuts,
-        child: Focus(
-          debugLabel: 'tv-adjustable-slider',
-          canRequestFocus: true,
-          skipTraversal: false,
-          // Slider 内部那个会吞掉四向键的 Focus / Shortcuts 退出焦点链；
-          // 鼠标 / 触控手势不受影响。
-          descendantsAreFocusable: false,
-          descendantsAreTraversable: false,
-          child: child,
-        ),
-      ),
+      child: child,
     );
   }
-}
-
-enum _SliderOp {
-  increase,
-  decrease,
-  leaveUp,
-  leaveDown,
-  leaveLeft,
-  leaveRight,
-}
-
-class _SliderKeyIntent extends Intent {
-  const _SliderKeyIntent(this.op);
-
-  final _SliderOp op;
 }
 
 class TvFocusScope extends StatefulWidget {
