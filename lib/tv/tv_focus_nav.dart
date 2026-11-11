@@ -42,13 +42,13 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
     // 这里必须明确放行，返回 null 会被 Shortcuts 当成 handled 吞掉按键。
     if (_isEditableFocus(node)) return KeyEventResult.ignored;
 
-    // 设置类滑块（TvAdjustableSlider）自己用内层 Shortcuts/Actions 处理
-    // 四个方向键（调值方向调值、其余方向主动 moveFocus 离开）。本 Action
-    // 挂在 TvFocusScope 更外层，若也执行几何导航会出现「焦点在滑块上按 ←
-    // 不调值、反而跳到上方一行」（MuMu 真机复现）。因此这里直接放行，
-    // 把方向键完全交给滑块自己的内层处理，避免两套逻辑重复驱动焦点。
-    if (node.debugLabel == 'tv-adjustable-slider') {
-      return KeyEventResult.ignored;
+    // 设置类滑块优先：TvDirectionalFocusAction 是每次方向键必然触发的唯一
+    // 入口（焦点移动本就由它驱动）。按注册的滑块 FocusNode / rect 匹配，
+    // 命中则交给滑块自己：调值方向调值、其余方向按几何移开焦点。这样不受
+    // Flutter 焦点节点身份或按键分发顺序影响（MuMu 实测：focused 语义节点
+    // 常是包着滑块的整行容器，靠 debugLabel 或内层 Shortcuts 都会漏）。
+    if (TvFocusController.instance.handleSliderKey(intent.direction, node)) {
+      return KeyEventResult.handled;
     }
 
     // 严格几何方向优先；若该方向上确实没有同行 / 同列候选，再放宽对齐
@@ -95,6 +95,20 @@ class _FocusCandidate {
   final Rect rect;
 }
 
+/// 设置滑块注册项：TvAdjustableSlider 把自己的 FocusNode 与方向键处理函数
+/// 登记进来。TvDirectionalFocusAction 是每次方向键必然触发的唯一入口，
+/// 在这里按 rect 匹配「焦点是否落在滑块行」，避免依赖 Flutter 焦点节点身份
+/// 或按键分发顺序（实测语义树 focused 常是包着滑块的整行容器，而不是
+/// 滑块自身的 Focus 节点，靠 debugLabel 判断会漏）。
+class _SliderRegistration {
+  const _SliderRegistration(this.node, this.handler);
+
+  final FocusNode node;
+
+  /// 返回 true 表示这个方向键已被滑块处理（调值或移开焦点）。
+  final bool Function(TraversalDirection direction, FocusNode current) handler;
+}
+
 class TvFocusController {
   TvFocusController._();
 
@@ -103,6 +117,42 @@ class TvFocusController {
   BuildContext? rootContext;
   bool _scheduled = false;
   bool _pendingForce = false;
+
+  final List<_SliderRegistration> _sliders = <_SliderRegistration>[];
+
+  void registerSlider(
+    FocusNode node,
+    bool Function(TraversalDirection, FocusNode) handler,
+  ) {
+    _sliders.removeWhere((r) => r.node == node);
+    _sliders.add(_SliderRegistration(node, handler));
+  }
+
+  void unregisterSlider(FocusNode node) {
+    _sliders.removeWhere((r) => r.node == node);
+  }
+
+  /// 若当前 primaryFocus 属于某个设置滑块，交给它处理方向键并返回 true。
+  /// 匹配规则：节点相同，或当前节点矩形包含滑块矩形中心且宽度不小于滑块的
+  /// 六成（覆盖「整行容器持有焦点」的情形）。
+  bool handleSliderKey(TraversalDirection direction, FocusNode current) {
+    if (_sliders.isEmpty) return false;
+    for (final r in _sliders) {
+      if (r.node == current) {
+        return r.handler(direction, current);
+      }
+    }
+    final cur = rectOf(current);
+    if (cur == null) return false;
+    for (final r in _sliders) {
+      final s = rectOf(r.node);
+      if (s == null) continue;
+      if (cur.contains(s.center) && cur.width >= s.width * 0.6) {
+        return r.handler(direction, current);
+      }
+    }
+    return false;
+  }
 
   void scheduleEnsureFocus() => _schedule(null);
 
@@ -666,7 +716,7 @@ class _TvFocusHighlightState extends State<TvFocusHighlight> {
 // 设备（含 MuMu / 手机 + 外接键盘或遥控器）上 main.dart 不挂载 TvFocusScope，
 // 裸露的 Flutter Slider 会把四向键吞掉却又不移动焦点；这里必须始终包装，
 // 并自己用 TvFocusController 做「移开焦点」，不依赖 TvFocusScope 是否挂载。
-class TvAdjustableSlider extends StatelessWidget {
+class TvAdjustableSlider extends StatefulWidget {
   const TvAdjustableSlider({
     required this.child,
     required this.value,
@@ -688,75 +738,88 @@ class TvAdjustableSlider extends StatelessWidget {
   final ValueChanged<double>? onChangeEnd;
   final bool vertical;
 
+  @override
+  State<TvAdjustableSlider> createState() => _TvAdjustableSliderState();
+}
+
+class _TvAdjustableSliderState extends State<TvAdjustableSlider> {
+  late final FocusNode _node;
+
+  @override
+  void initState() {
+    super.initState();
+    _node = FocusNode(debugLabel: 'tv-adjustable-slider');
+    // 注册到唯一会触发的方向键入口（TvDirectionalFocusAction）。
+    TvFocusController.instance.registerSlider(_node, _handleDirection);
+  }
+
+  @override
+  void didUpdateWidget(TvAdjustableSlider oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 值/回调随 setState 变化时重新注册，保证 handler 读到最新参数。
+    TvFocusController.instance.registerSlider(_node, _handleDirection);
+  }
+
+  @override
+  void dispose() {
+    TvFocusController.instance.unregisterSlider(_node);
+    _node.dispose();
+    super.dispose();
+  }
+
+  bool _handleDirection(TraversalDirection direction, FocusNode current) {
+    final bool isAdjust = widget.vertical
+        ? (direction == TraversalDirection.up ||
+            direction == TraversalDirection.down)
+        : (direction == TraversalDirection.left ||
+            direction == TraversalDirection.right);
+    if (isAdjust) {
+      final bool increase = widget.vertical
+          ? direction == TraversalDirection.up
+          : direction == TraversalDirection.right;
+      _adjust(increase);
+      return true;
+    }
+    // 非调值方向：按几何把焦点移到相邻控件（严格 + 放宽兜底）。
+    if (!TvFocusController.instance.moveFocus(direction, current)) {
+      TvFocusController.instance.moveFocus(
+        direction,
+        current,
+        relaxed: true,
+      );
+    }
+    return true;
+  }
+
   void _adjust(bool increase) {
+    final min = widget.min;
+    final max = widget.max;
     if (max <= min) return;
+    final divisions = widget.divisions;
     final step = (max - min) / (divisions ?? 20);
-    var next = (value + (increase ? step : -step)).clamp(min, max);
-    if (divisions != null && divisions! > 0) {
+    var next = (widget.value + (increase ? step : -step)).clamp(min, max);
+    if (divisions != null && divisions > 0) {
       next = min + ((next - min) / step).round() * step;
       next = next.clamp(min, max);
     }
-    if ((next - value).abs() > 1e-9) {
-      onChanged(next);
-      onChangeEnd?.call(next);
-    }
-  }
-
-  void _leave(TraversalDirection direction, FocusNode node) {
-    // 严格方向找不到时放宽一次（方向不变），避免死角卡住。
-    if (!TvFocusController.instance.moveFocus(direction, node)) {
-      TvFocusController.instance.moveFocus(
-        direction,
-        node,
-        relaxed: true,
-      );
+    if ((next - widget.value).abs() > 1e-9) {
+      widget.onChanged(next);
+      widget.onChangeEnd?.call(next);
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // 单一处理路径：四个方向键全部由这个 Focus 的 onKeyEvent 处理并返回
-    // handled，不会冒泡到外层 TvFocusScope 的几何导航（后者已在
-    // TvDirectionalFocusAction 里对 debugLabel='tv-adjustable-slider' 放行）。
-    //   * 调值方向（水平 ←/→，竖直 ↑/↓）→ _adjust
-    //   * 其余方向 → _leave 主动按几何把焦点移到相邻控件
-    // 这样只有一条路径，绝不会出现「一次按键调两格」或「焦点被抢走」。
+    // 方向键统一由注册到 TvDirectionalFocusAction 的 handler 处理，这里不再
+    // 放 onKeyEvent / 内层 Shortcuts（避免多路径重复调值或抢焦点）。
     // Slider 内部会吞键的 Focus / Shortcuts 退出焦点链；鼠标 / 触控不受影响。
     return Focus(
-      debugLabel: 'tv-adjustable-slider',
+      focusNode: _node,
       canRequestFocus: true,
       skipTraversal: false,
       descendantsAreFocusable: false,
       descendantsAreTraversable: false,
-      onKeyEvent: (FocusNode node, KeyEvent event) {
-        if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-          return KeyEventResult.ignored;
-        }
-        final key = event.logicalKey;
-        final isUp = key == LogicalKeyboardKey.arrowUp;
-        final isDown = key == LogicalKeyboardKey.arrowDown;
-        final isLeft = key == LogicalKeyboardKey.arrowLeft;
-        final isRight = key == LogicalKeyboardKey.arrowRight;
-        if (!isUp && !isDown && !isLeft && !isRight) {
-          return KeyEventResult.ignored;
-        }
-        final increase = vertical ? isUp : isRight;
-        final decrease = vertical ? isDown : isLeft;
-        if (increase || decrease) {
-          _adjust(increase);
-          return KeyEventResult.handled;
-        }
-        final direction = isUp
-            ? TraversalDirection.up
-            : (isDown
-                ? TraversalDirection.down
-                : (isLeft
-                    ? TraversalDirection.left
-                    : TraversalDirection.right));
-        _leave(direction, node);
-        return KeyEventResult.handled;
-      },
-      child: child,
+      child: widget.child,
     );
   }
 }
