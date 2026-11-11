@@ -1,3 +1,4 @@
+import 'dart:developer' as developer;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -204,6 +205,16 @@ class TvFocusController {
     final cur = currentRect.center;
     const double epsilon = 2.0;
 
+    // 诊断：仅在候选集中包含设置滑块时输出一次，确认它确实进入了几何导航
+    // 候选集（稳定后保留亦无副作用，走 debug 通道、不刷屏）。
+    if (candidates.any((c) => c.node.debugLabel == 'tv-adjustable-slider')) {
+      developer.log(
+        'dir=$direction cur=${cur.dx.toInt()},${cur.dy.toInt()} '
+        'n=${candidates.length} sliderInCandidates=true',
+        name: 'StarNoteFocus',
+      );
+    }
+
     // 抽屉 / 对话框 / 弹出菜单打开时把焦点锁在该浮层内部；主界面则允许
     // 跨越左侧栏、内容区、底部播放栏等不同的 FocusScope —— 早期版本用
     // enclosingScope 硬隔离，导致「红圈 / 绿圈像两个图层、焦点互相过不去」。
@@ -266,6 +277,19 @@ class TvFocusController {
           primary = center.dy - cur.dy;
           secondary = (center.dx - cur.dx).abs();
           break;
+      }
+
+      // 设置类滑块是横向长条（中心点落在轨道中点），从上方/下方的按钮做
+      // 垂直导航时，中心点的水平差会被放大 3.5 倍，长条因此永远被同列的
+      // 窄按钮挤掉，遥控器根本走不到滑块。仅对这一类候选：垂直方向且当前
+      // 控件水平投影落在轨道范围内时，把副轴偏移按 0 计，让「正上/正下」
+      // 由垂直距离决定，符合视觉直觉；不改动其它控件的评分。
+      if (candidate.node.debugLabel == 'tv-adjustable-slider' &&
+          (direction == TraversalDirection.up ||
+              direction == TraversalDirection.down) &&
+          cur.dx >= candidate.rect.left - epsilon &&
+          cur.dx <= candidate.rect.right + epsilon) {
+        secondary = 0;
       }
 
       // 「同一视觉行 / 同一视觉列」优先：
@@ -669,6 +693,7 @@ class TvAdjustableSlider extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Focus(
+      debugLabel: 'tv-adjustable-slider',
       canRequestFocus: true,
       skipTraversal: false,
       // Slider 内部那个会吞掉四向键的 Focus / Shortcuts 退出焦点链，
