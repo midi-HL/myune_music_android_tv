@@ -1,4 +1,3 @@
-import 'dart:developer' as developer;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -204,16 +203,6 @@ class TvFocusController {
     final candidates = collectCandidates(FocusManager.instance.rootScope);
     final cur = currentRect.center;
     const double epsilon = 2.0;
-
-    // 诊断：仅在候选集中包含设置滑块时输出一次，确认它确实进入了几何导航
-    // 候选集（稳定后保留亦无副作用，走 debug 通道、不刷屏）。
-    if (candidates.any((c) => c.node.debugLabel == 'tv-adjustable-slider')) {
-      developer.log(
-        'dir=$direction cur=${cur.dx.toInt()},${cur.dy.toInt()} '
-        'n=${candidates.length} sliderInCandidates=true',
-        name: 'StarNoteFocus',
-      );
-    }
 
     // 抽屉 / 对话框 / 弹出菜单打开时把焦点锁在该浮层内部；主界面则允许
     // 跨越左侧栏、内容区、底部播放栏等不同的 FocusScope —— 早期版本用
@@ -690,66 +679,127 @@ class TvAdjustableSlider extends StatelessWidget {
   final ValueChanged<double>? onChangeEnd;
   final bool vertical;
 
+  void _adjust(bool increase) {
+    if (max <= min) return;
+    final step = (max - min) / (divisions ?? 20);
+    var next = (value + (increase ? step : -step)).clamp(min, max);
+    if (divisions != null && divisions! > 0) {
+      next = min + ((next - min) / step).round() * step;
+      next = next.clamp(min, max);
+    }
+    if ((next - value).abs() > 1e-9) {
+      onChanged(next);
+      onChangeEnd?.call(next);
+    }
+  }
+
+  void _leave(TraversalDirection direction, FocusNode node) {
+    // 严格方向找不到时放宽一次（方向不变），避免死角卡住。
+    if (!TvFocusController.instance.moveFocus(direction, node)) {
+      TvFocusController.instance.moveFocus(
+        direction,
+        node,
+        relaxed: true,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      debugLabel: 'tv-adjustable-slider',
-      canRequestFocus: true,
-      skipTraversal: false,
-      // Slider 内部那个会吞掉四向键的 Focus / Shortcuts 退出焦点链，
-      // 方向键统一由这一层处理；鼠标 / 触控手势不受影响。
-      descendantsAreFocusable: false,
-      descendantsAreTraversable: false,
-      onKeyEvent: (FocusNode node, KeyEvent event) {
-        if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
-          return KeyEventResult.ignored;
-        }
-        final key = event.logicalKey;
-        final isUp = key == LogicalKeyboardKey.arrowUp;
-        final isDown = key == LogicalKeyboardKey.arrowDown;
-        final isLeft = key == LogicalKeyboardKey.arrowLeft;
-        final isRight = key == LogicalKeyboardKey.arrowRight;
-        if (!isUp && !isDown && !isLeft && !isRight) {
-          return KeyEventResult.ignored;
-        }
+    // 关键点：TvFocusScope 的 Shortcuts/Actions 挂在更外层，方向键会先被
+    // 它截获成 TvDirectionalFocusIntent（实测：焦点在滑块上按 ← 直接跳到
+    // 上方一行，而不是调值）。因此在滑块内层再放一层 Shortcuts/Actions，
+    // 四个方向键全部由这里处理并返回 handled，外层几何导航不再收到：
+    //   * 调值方向（水平 ←/→，竖直 ↑/↓）→ _adjust
+    //   * 非调值方向 → _leave 主动按几何把焦点移到相邻控件
+    // 这样既不吞键、又能调值与离开，且不改动全局导航逻辑。
+    final bool adjustOnHorizontal = !vertical;
+    final shortcuts = <ShortcutActivator, _SliderKeyIntent>{
+      const SingleActivator(LogicalKeyboardKey.arrowLeft):
+          _SliderKeyIntent(adjustOnHorizontal
+              ? _SliderOp.decrease
+              : _SliderOp.leaveLeft),
+      const SingleActivator(LogicalKeyboardKey.arrowRight):
+          _SliderKeyIntent(adjustOnHorizontal
+              ? _SliderOp.increase
+              : _SliderOp.leaveRight),
+      const SingleActivator(LogicalKeyboardKey.arrowUp):
+          _SliderKeyIntent(adjustOnHorizontal
+              ? _SliderOp.leaveUp
+              : _SliderOp.increase),
+      const SingleActivator(LogicalKeyboardKey.arrowDown):
+          _SliderKeyIntent(adjustOnHorizontal
+              ? _SliderOp.leaveDown
+              : _SliderOp.decrease),
+    };
 
-        final increase = vertical ? isUp : isRight;
-        final decrease = vertical ? isDown : isLeft;
-        if (!increase && !decrease) {
-          // 非调值方向：直接按几何导航把焦点移到相邻控件。
-          // 严格方向找不到时放宽一次（方向不变），避免死角卡住。
-          final direction = isUp
-              ? TraversalDirection.up
-              : (isDown
-                  ? TraversalDirection.down
-                  : (isLeft
-                      ? TraversalDirection.left
-                      : TraversalDirection.right));
-          if (!TvFocusController.instance.moveFocus(direction, node)) {
-            TvFocusController.instance.moveFocus(
-              direction,
-              node,
-              relaxed: true,
-            );
-          }
-          return KeyEventResult.handled;
-        }
-        if (max <= min) return KeyEventResult.handled;
-        final step = (max - min) / (divisions ?? 20);
-        var next = (value + (increase ? step : -step)).clamp(min, max);
-        if (divisions != null && divisions! > 0) {
-          next = min + ((next - min) / step).round() * step;
-          next = next.clamp(min, max);
-        }
-        if ((next - value).abs() > 1e-9) {
-          onChanged(next);
-          onChangeEnd?.call(next);
-        }
-        return KeyEventResult.handled;
+    return Actions(
+      actions: <Type, Action<Intent>>{
+        _SliderKeyIntent: CallbackAction<_SliderKeyIntent>(
+          onInvoke: (_SliderKeyIntent intent) {
+            final node = FocusManager.instance.primaryFocus;
+            switch (intent.op) {
+              case _SliderOp.increase:
+                _adjust(true);
+                break;
+              case _SliderOp.decrease:
+                _adjust(false);
+                break;
+              case _SliderOp.leaveUp:
+                if (node != null) {
+                  _leave(TraversalDirection.up, node);
+                }
+                break;
+              case _SliderOp.leaveDown:
+                if (node != null) {
+                  _leave(TraversalDirection.down, node);
+                }
+                break;
+              case _SliderOp.leaveLeft:
+                if (node != null) {
+                  _leave(TraversalDirection.left, node);
+                }
+                break;
+              case _SliderOp.leaveRight:
+                if (node != null) {
+                  _leave(TraversalDirection.right, node);
+                }
+                break;
+            }
+            return true;
+          },
+        ),
       },
-      child: child,
+      child: Shortcuts(
+        shortcuts: shortcuts,
+        child: Focus(
+          debugLabel: 'tv-adjustable-slider',
+          canRequestFocus: true,
+          skipTraversal: false,
+          // Slider 内部那个会吞掉四向键的 Focus / Shortcuts 退出焦点链；
+          // 鼠标 / 触控手势不受影响。
+          descendantsAreFocusable: false,
+          descendantsAreTraversable: false,
+          child: child,
+        ),
+      ),
     );
   }
+}
+
+enum _SliderOp {
+  increase,
+  decrease,
+  leaveUp,
+  leaveDown,
+  leaveLeft,
+  leaveRight,
+}
+
+class _SliderKeyIntent extends Intent {
+  const _SliderKeyIntent(this.op);
+
+  final _SliderOp op;
 }
 
 class TvFocusScope extends StatefulWidget {
