@@ -475,9 +475,11 @@ class TvFocusController {
     }
 
     if (best == null) {
-      // 到边界时明确把焦点按回当前控件，避免框架把 focus 还给 rootScope
-      // 或残留在一个没有高亮的容器上（表现为「按了一下就整页没焦点」）。
-      current.requestFocus();
+      // 到边界时**什么都不要做**：Flutter 默认就会把焦点留在当前控件。
+      // 曾在这里调用 current.requestFocus() 试图「按回」焦点，但它会触发
+      // FocusManager 通知 ->  guardian/restore 连锁，在控件栏动画期间反而
+      // 把焦点弄丢（真机复现：按 UP 后整页无焦点、后续方向键全部失效）。
+      // 静默返回 false，由 Action 末尾的 restoreFocusNow 判断是否需要兜底。
       return false;
     }
     best.node.requestFocus();
