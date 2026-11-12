@@ -333,6 +333,11 @@ class _SongDetailPageState extends State<SongDetailPage> {
     // 只「观察」硬件按键（返回 false 不拦截），让任何方向键 / 确认键 / 媒体键
     // 都能先恢复控件栏，且不影响 TvInputScope 的几何导航与Flutter默认按键处理。
     HardwareKeyboard.instance.addHandler(_keyHandler);
+    // 播放页自己声明「焦点该回到哪里」：任何时候焦点落空，都优先拉回控制栏，
+    // 不让全局恢复逻辑跳到底层迷你播放条或保活旧页面。
+    TvFocusController.instance.registerRestoreHandler(
+      () => TvFocusController.instance.focusFirstWhere(_inPlaybar),
+    );
 
     // 播放页是独立全屏 route，打开时若不主动指定焦点，Flutter 会把初始焦点
     // 交给第一个可聚焦控件 —— 实测是右侧歌词行（TextButton）。歌词行每行都
@@ -420,6 +425,7 @@ class _SongDetailPageState extends State<SongDetailPage> {
   @override
   void dispose() {
     HardwareKeyboard.instance.removeHandler(_keyHandler);
+    TvFocusController.instance.registerRestoreHandler(null);
     _cancelTimer();
     super.dispose();
   }

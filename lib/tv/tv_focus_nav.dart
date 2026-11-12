@@ -34,7 +34,7 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
     final node = manager.primaryFocus;
 
     if (node == null || node == manager.rootScope || node.context == null) {
-      TvFocusController.instance.scheduleRestoreFocus();
+      TvFocusController.instance.restoreFocusNow();
       return KeyEventResult.handled;
     }
 
@@ -43,7 +43,7 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
     // 按方向键毫无反应，而 OK 仍会激活那个隐藏控件（实测会误触发旧页面的
     // 收藏按钮，弹出「已收藏 / 已取消收藏」）。先把焦点拉回当前可见页面。
     if (TvFocusController.rectOf(node) == null) {
-      TvFocusController.instance.scheduleRestoreFocus();
+      TvFocusController.instance.restoreFocusNow();
       return KeyEventResult.handled;
     }
 
@@ -57,6 +57,7 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
     // Flutter 焦点节点身份或按键分发顺序影响（MuMu 实测：focused 语义节点
     // 常是包着滑块的整行容器，靠 debugLabel 或内层 Shortcuts 都会漏）。
     if (TvFocusController.instance.handleSliderKey(intent.direction, node)) {
+      TvFocusController.instance.restoreFocusNow();
       return KeyEventResult.handled;
     }
 
@@ -69,6 +70,9 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
         relaxed: true,
       );
     }
+    // 两个方向都找不到候选（例如控制栏第一个按钮再按 UP）时，同步把焦点
+    // 保持在 / 拉回一个可见控件，绝不留下空焦点。
+    TvFocusController.instance.restoreFocusNow();
     return KeyEventResult.handled;
   }
 
@@ -126,6 +130,35 @@ class TvFocusController {
   BuildContext? rootContext;
   bool _scheduled = false;
   bool _pendingForce = false;
+
+  /// 当前页面可注册自己的「焦点恢复目标」。播放页用它把焦点拉回控制栏，
+  /// 避免全局 _pickLeaf 跳到底层迷你播放条 / 保活旧页面等不该聚焦的节点。
+  bool Function()? _restoreHandler;
+
+  void registerRestoreHandler(bool Function()? handler) {
+    _restoreHandler = handler;
+  }
+
+  /// 同步恢复焦点：焦点本来就有效时**不要动它**（否则会覆盖 moveFocus
+  /// 刚完成的移动，方向键就永远跳回第一个按钮）；只有真的落空 / 不可见时，
+  /// 才用当前页面注册的目标拉回，失败再退回全局可见候选。
+  bool restoreFocusNow() {
+    final manager = FocusManager.instance;
+    final focus = manager.primaryFocus;
+    final valid = focus != null &&
+        focus != manager.rootScope &&
+        focus.context != null &&
+        focus.context!.mounted &&
+        rectOf(focus) != null;
+    if (valid) return true;
+    final handler = _restoreHandler;
+    if (handler != null) {
+      try {
+        if (handler()) return true;
+      } catch (_) {}
+    }
+    return ensureValidFocus();
+  }
 
   final List<_SliderRegistration> _sliders = <_SliderRegistration>[];
 
@@ -204,6 +237,29 @@ class TvFocusController {
         _apply(pendingWhere, force: pendingForce);
       });
     });
+  }
+
+  /// 同步保证「当前焦点一定是一个可见控件」。
+  ///
+  /// 方向键走到边界（例如控制栏第一个按钮再按 UP）时两个方向的
+  /// moveFocus 都会失败；若此时控件正好因自动隐藏等原因失去语义，
+  /// 焦点会变成 rootScope / 落到不可见节点，表现为整页无高亮，下一次 OK
+  /// 还可能激活旧页面按钮。这里在每次方向键处理前后各兜一次，确保
+  /// 遥控器 / 手柄任何时刻都有明确落点。
+  bool ensureValidFocus() {
+    final manager = FocusManager.instance;
+    final focus = manager.primaryFocus;
+    if (focus != null &&
+        focus != manager.rootScope &&
+        focus.context != null &&
+        focus.context!.mounted &&
+        rectOf(focus) != null) {
+      return true;
+    }
+    final candidates = collectCandidates(manager.rootScope);
+    if (candidates.isEmpty) return false;
+    _pickLeaf(candidates).requestFocus();
+    return true;
   }
 
   /// 同步把焦点放到满足 [where] 的候选里视觉最靠前的一个。
@@ -904,15 +960,15 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     // 焦点彻底落空（rootScope / null）时同样要恢复：否则下一次 OK 会激活
     // 树里残留的旧页面按钮，实测会弹出「已收藏 / 已取消收藏」。
     if (focus == null || focus == manager.rootScope) {
-      TvFocusController.instance.scheduleRestoreFocus();
+      TvFocusController.instance.restoreFocusNow();
       return;
     }
     if (focus.context == null || !focus.context!.mounted) {
-      TvFocusController.instance.scheduleRestoreFocus();
+      TvFocusController.instance.restoreFocusNow();
       return;
     }
     if (TvFocusController.rectOf(focus) == null) {
-      TvFocusController.instance.scheduleRestoreFocus();
+      TvFocusController.instance.restoreFocusNow();
     }
   }
 
