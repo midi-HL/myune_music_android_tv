@@ -582,7 +582,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
                 width: 230,
                 child: TvActionButton(
                   label: '添加 Google Drive',
-                  valueText: '只读 · 扫码',
+                  value: '只读 · 扫码',
                   icon: Icons.cloud_outlined,
                   onPressed: _addGoogleDriveSource,
                 ),

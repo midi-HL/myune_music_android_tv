@@ -55,6 +55,7 @@ class DrivePairingServer {
   static const int _portAttempts = 6;
 
   HttpServer? _server;
+  StreamSubscription<HttpRequest>? _subscription;
   late final String _pair;
   String? _address;
   int _port = _firstPort;
@@ -88,10 +89,14 @@ class DrivePairingServer {
       throw StateError('配对端口 $_firstPort 起均被占用，请稍后重试');
     }
     _server = server;
-    unawaited(server.listen(_handle));
+    // HttpServer.listen() 返回 StreamSubscription<HttpRequest>，不是 Future；
+    // 保留引用以便 stop() 时取消，避免服务关闭后仍回调 _handle。
+    _subscription = server.listen(_handle);
   }
 
   Future<void> stop() async {
+    await _subscription?.cancel();
+    _subscription = null;
     await _server?.close(force: true);
     _server = null;
   }
