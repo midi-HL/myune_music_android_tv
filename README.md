@@ -37,10 +37,12 @@
 
 ## 0. 本次更新与功能总览
 
-### 0.1 本版（v1.1.2）更新了什么
+### 0.1 本版（v1.2.0）更新了什么
 
-> 版本号长期保持 `v1.1.2`，每次改动都用同名 Release 资产 `--clobber` 覆盖，
-> 不新建 tag。具体**缺陷修复清单**写在 Release 发布说明里。
+> 采用语义化版本：新增功能升 minor、只修 bug 升 patch，每次发版**新建独立 tag / Release**
+> （`v1.0.0` → `v1.1.0` → `v1.1.1` → `v1.1.2` → **`v1.2.0`**）。
+> 这样应用内「检查更新」能通过 `/releases/latest` 感知到新版本，也能随时回滚到任一构建。
+> 具体**缺陷修复清单**写在对应版本的 Release 发布说明里。
 
 | 类别 | 更新内容 |
 | --- | --- |
@@ -114,7 +116,7 @@ Android TV 启动器共用；TV 桌面另有 320×180 横幅。
 | 上游原文说明 | [UPSTREAM_README.md](UPSTREAM_README.md)（原样保留） |
 | **本改版开源仓库** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | 本改版协议 | **Apache License 2.0**（与上游一致） |
-| 本改版版本 | `1.1.2`（见 `lib/tv/tv_app_info.dart`） |
+| 本改版版本 | `1.2.0`（见 `lib/tv/tv_app_info.dart`） |
 
 本仓库**保留了上游完整提交历史**（未 squash、未改写），所有改版内容以新增提交与 tag 形式记录，
 可随时回滚。改动清单见 [NOTICE](NOTICE) 与 [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)。
@@ -353,6 +355,8 @@ keystore 与密码不进入仓库。
 | `v1.1.0` | 网络媒体（WebDAV / FTP / 哔哩哔哩）+ 固定 release 签名版本 |
 | `v1.1.1` | 网络媒体播放修复、哔哩哔哩分页重构、历史播放 / 收藏、老旧音频格式兼容 |
 | `v1.1.2` | 十字方向键全链路复核、推荐限定音乐区、B 站字幕 / 歌词显示、全新品牌图标 |
+| `v1.1.2`（后续累积） | 播放页尺寸还原与自动隐藏控件栏、网络硬盘反哺（内嵌标签 / 收藏分类）、遥控器可达性修复（曾以 `--clobber` 覆盖同名资产） |
+| **`v1.2.0`** | **新增只读 Google Drive 源（扫码配对、零电视打字）、扫码配对页与本地授权脚本；起改用独立 tag 发版** |
 
 ```bash
 git checkout tv-v4-focus-fix      # 回到某个锚点

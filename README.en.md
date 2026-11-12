@@ -38,10 +38,13 @@
 
 ## 0. What's new & feature overview
 
-### 0.1 What's new in v1.1.2
+### 0.1 What's new in v1.2.0
 
-> The version tag stays `v1.1.2`; each update replaces the Release assets with
-> `--clobber` instead of creating a new tag. **Bug fixes are listed in the Release notes.**
+> Semantic versioning: new features bump the minor version, bug-only fixes bump the patch,
+> and each release gets its **own tag / Release** (`v1.0.0` → `v1.1.0` → `v1.1.1` →
+> `v1.1.2` → **`v1.2.0`**). This lets the in-app update check see new builds via
+> `/releases/latest` and keeps every build individually rollback-able.
+> **Bug fixes are listed in the Release notes** of the matching version.
 
 | Area | Changes |
 | --- | --- |
@@ -122,7 +125,7 @@ and the existing phone behaviour (immersive mode, UI scaling, SAF) is unchanged.
 | Original upstream README | [UPSTREAM_README.md](UPSTREAM_README.md) (preserved verbatim) |
 | **This fork's repository** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | This fork's license | **Apache License 2.0** (same as upstream) |
-| This fork's version | `1.1.2` (see `lib/tv/tv_app_info.dart`) |
+| This fork's version | `1.2.0` (see `lib/tv/tv_app_info.dart`) |
 
 The **full upstream commit history is preserved** (no squash, no history rewrite). All port
 work is recorded as additional commits and tags so it can be rolled back at any time. See
@@ -407,6 +410,8 @@ Full history and anchor tags are preserved:
 | `v1.1.0` | Network media (WebDAV / FTP / Bilibili) + fixed release signing |
 | `v1.1.1` | Network playback fixes, Bilibili pagination redesign, play history / favorites, legacy audio format support |
 | `v1.1.2` | Full D-pad navigation audit, music-only recommendations, Bilibili subtitles / lyrics, redesigned branding |
+| `v1.1.2` (later builds) | Now-playing scale restoration and auto-hiding controls, network-drive backport (embedded tags / favourites), D-pad reachability fixes (assets were replaced via `--clobber`) |
+| **`v1.2.0`** | **New read-only Google Drive source (QR pairing, zero typing on TV), pairing page and local auth helper; releases now use dedicated tags** |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor
