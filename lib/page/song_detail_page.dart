@@ -1,6 +1,7 @@
 // 音频可视化:https://pub.dev/packages/sonix
 
 import 'dart:async';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 import 'dart:math' as math;
 
@@ -18,6 +19,7 @@ import './setting/settings_provider.dart';
 import '../widgets/playing_queue_drawer.dart';
 import '../widgets/lyrics_settings_drawer.dart';
 import '../tv/tv_focus_nav.dart';
+import '../services/network/remote_media_registry.dart';
 import '../widgets/ui_scale_scope.dart';
 import 'playlist/playlist_models.dart';
 
@@ -314,6 +316,12 @@ class _SongDetailPageState extends State<SongDetailPage> {
   bool _lastSettingValue = false;
   bool _autoHideEnabled = false;
 
+  // 网络媒体（B 站 / 网盘）封面按需下载后的回填缓存。Song 本身只带封面 URL，
+  // albumArt 为空，播放页原先只显示音符占位；这里补上自动获取与方形缩放。
+  Uint8List? _networkArtwork;
+  String? _artworkSongPath;
+  String? _artworkLoadingPath;
+
   // 缓存 tear-off，保证 add/remove 用的是同一个回调对象。
   late final bool Function(KeyEvent) _keyHandler = _onHardwareKey;
 
@@ -325,6 +333,45 @@ class _SongDetailPageState extends State<SongDetailPage> {
     // 只「观察」硬件按键（返回 false 不拦截），让任何方向键 / 确认键 / 媒体键
     // 都能先恢复控件栏，且不影响 TvInputScope 的几何导航与Flutter默认按键处理。
     HardwareKeyboard.instance.addHandler(_keyHandler);
+
+    // 播放页是独立全屏 route，打开时若不主动指定焦点，Flutter 会把初始焦点
+    // 交给第一个可聚焦控件 —— 实测是右侧歌词行（TextButton）。歌词行每行都
+    // 可聚焦，于是 DOWN 在歌词间跳、LEFT/RIGHT 找不到候选就整页丢失焦点，
+    // OK 还会误触发保活旧页面的收藏按钮。这里把焦点明确落到播放控制栏。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        TvFocusController.instance.scheduleFocusWhere(
+          (context) =>
+              context.findAncestorWidgetOfExactType<Playbar>() != null ||
+              context.findAncestorWidgetOfExactType<PortraitPlaybar>() != null,
+        );
+      });
+    });
+  }
+
+  /// 网络媒体封面：优先用 Song 已带的 albumArt；否则按代理 URL 里的封面地址
+  /// 异步下载并回填。失败 / 无封面时保持占位，不阻断播放。
+  void _ensureArtwork(Song? song) {
+    if (song == null) return;
+    final embedded = song.albumArt;
+    if (embedded != null && embedded.isNotEmpty) return;
+    final path = song.filePath;
+    if (!RemoteMediaRegistry.isNetwork(path)) return;
+    if (_artworkSongPath == path && _networkArtwork != null) return;
+    if (_artworkLoadingPath == path) return;
+    _artworkLoadingPath = path;
+    unawaited(() async {
+      final bytes = await RemoteMediaRegistry.artworkFor(path);
+      if (!mounted) return;
+      if (bytes != null && bytes.isNotEmpty) {
+        setState(() {
+          _networkArtwork = bytes;
+          _artworkSongPath = path;
+        });
+      }
+      _artworkLoadingPath = null;
+    }());
   }
 
   bool _onHardwareKey(KeyEvent event) {
@@ -470,14 +517,20 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                         initialData: playlistNotifier
                                             .currentLyricLineIndex,
                                         builder: (context, snapshot) {
-                                          return LyricsView(
-                                            maxLinesPerLyric: context
-                                                .watch<SettingsProvider>()
-                                                .maxLinesPerLyric,
-                                            onTapLine: (index) {
-                                              playlistNotifier
-                                                  .seekToLyricLine(index);
-                                            },
+                                          // 歌词行是 TextButton，原本每行都能拿焦点。
+                                          // 遥控器会把初始焦点落在歌词上、按左右又丢焦点；
+                                          // 这里让歌词退出 D-pad 焦点链（鼠标 / 触摸点击
+                                          // seek 不受影响），焦点只落在播放控件上。
+                                          return ExcludeFocus(
+                                            child: LyricsView(
+                                              maxLinesPerLyric: context
+                                                  .watch<SettingsProvider>()
+                                                  .maxLinesPerLyric,
+                                              onTapLine: (index) {
+                                                playlistNotifier
+                                                    .seekToLyricLine(index);
+                                              },
+                                            ),
                                           );
                                         },
                                       );
@@ -520,6 +573,17 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                         builder: (context, playlistNotifier, child) {
                                           final currentSong =
                                               playlistNotifier.currentSong;
+                                          // B 站 / 网盘歌曲只带封面 URL，这里按需下载回填。
+                                          _ensureArtwork(currentSong);
+                                          final embedded = currentSong?.albumArt;
+                                          final Uint8List? coverArt =
+                                              (embedded != null &&
+                                                      embedded.isNotEmpty)
+                                                  ? embedded
+                                                  : (_artworkSongPath ==
+                                                          currentSong?.filePath
+                                                      ? _networkArtwork
+                                                      : null);
                                           return LayoutBuilder(
                                             builder: (context, constraints) {
                                               final w = constraints.maxWidth;
@@ -724,16 +788,23 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                                               child: AspectRatio(
                                                                 aspectRatio: 1,
                                                                 child:
-                                                                    (currentSong?.albumArt !=
+                                                                    (coverArt !=
                                                                             null &&
-                                                                        currentSong!
-                                                                            .albumArt!
+                                                                        coverArt
                                                                             .isNotEmpty)
                                                                     ? Image.memory(
-                                                                        currentSong
-                                                                            .albumArt!,
+                                                                        coverArt,
+                                                                        // 按方形容器等比裁切缩放；B 站封面
+                                                                        // 多为 16:9，cover 保证不变形。
                                                                         fit: BoxFit
                                                                             .cover,
+                                                                        cacheWidth:
+                                                                            (imageSize *
+                                                                                    2)
+                                                                                .round(),
+                                                                        filterQuality:
+                                                                            FilterQuality
+                                                                                .medium,
                                                                         errorBuilder:
                                                                             (
                                                                               _,
@@ -816,14 +887,20 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                         initialData: playlistNotifier
                                             .currentLyricLineIndex,
                                         builder: (context, snapshot) {
-                                          return LyricsView(
-                                            maxLinesPerLyric: context
-                                                .watch<SettingsProvider>()
-                                                .maxLinesPerLyric,
-                                            onTapLine: (index) {
-                                              playlistNotifier
-                                                  .seekToLyricLine(index);
-                                            },
+                                          // 歌词行是 TextButton，原本每行都能拿焦点。
+                                          // 遥控器会把初始焦点落在歌词上、按左右又丢焦点；
+                                          // 这里让歌词退出 D-pad 焦点链（鼠标 / 触摸点击
+                                          // seek 不受影响），焦点只落在播放控件上。
+                                          return ExcludeFocus(
+                                            child: LyricsView(
+                                              maxLinesPerLyric: context
+                                                  .watch<SettingsProvider>()
+                                                  .maxLinesPerLyric,
+                                              onTapLine: (index) {
+                                                playlistNotifier
+                                                    .seekToLyricLine(index);
+                                              },
+                                            ),
                                           );
                                         },
                                       );

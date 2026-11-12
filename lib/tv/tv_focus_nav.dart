@@ -34,7 +34,16 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
     final node = manager.primaryFocus;
 
     if (node == null || node == manager.rootScope || node.context == null) {
-      TvFocusController.instance.scheduleEnsureFocus();
+      TvFocusController.instance.scheduleRestoreFocus();
+      return KeyEventResult.handled;
+    }
+
+    // 焦点落在「看得到坐标、看不到界面」的节点上（Navigator 保活的旧页面、
+    // Offstage 页签、页面切换动画中的离屏 route）时，几何导航会直接失效：
+    // 按方向键毫无反应，而 OK 仍会激活那个隐藏控件（实测会误触发旧页面的
+    // 收藏按钮，弹出「已收藏 / 已取消收藏」）。先把焦点拉回当前可见页面。
+    if (TvFocusController.rectOf(node) == null) {
+      TvFocusController.instance.scheduleRestoreFocus();
       return KeyEventResult.handled;
     }
 
@@ -257,7 +266,11 @@ class TvFocusController {
     FocusNode? exclude,
   }) {
     final currentRect = rectOf(current);
-    if (currentRect == null) return false;
+    if (currentRect == null) {
+      // 起点不可见时不要空转：拉回当前页面，避免焦点卡在旧页面节点上。
+      TvFocusController.instance.scheduleRestoreFocus();
+      return false;
+    }
 
     final screen = screenSize();
     final candidates = collectCandidates(FocusManager.instance.rootScope);
@@ -852,7 +865,27 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     // 改由可写的 highlightStrategy 固定策略，避免随触摸输入切回 touch 模式。
     FocusManager.instance.highlightStrategy =
         FocusHighlightStrategy.alwaysTraditional;
+    // 焦点一旦落到不可见节点（旧页面 / Offstage 页签 / 动画中的离屏 route），
+    // 立刻拉回当前页面。这样 OK 永远不会激活一个用户看不见的按钮 ——
+    // 实测这个场景会误触发旧页面的收藏开关。
+    FocusManager.instance.addListener(_guardPrimaryFocus);
     TvFocusController.instance.scheduleEnsureFocus();
+  }
+
+  void _guardPrimaryFocus() {
+    final manager = FocusManager.instance;
+    final focus = manager.primaryFocus;
+    if (focus == null || focus == manager.rootScope) return;
+    if (focus.context == null || !focus.context!.mounted) return;
+    if (TvFocusController.rectOf(focus) == null) {
+      TvFocusController.instance.scheduleRestoreFocus();
+    }
+  }
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeListener(_guardPrimaryFocus);
+    super.dispose();
   }
 
   @override

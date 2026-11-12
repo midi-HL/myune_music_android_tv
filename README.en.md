@@ -54,6 +54,9 @@
 | Artwork | Only the 320x180 TV banner was redrawn; the square / round phone launcher icons are untouched |
 | Network drives (this backport) | See "2026-11-12 backport" below |
 | Gamepad / remote | Every new screen, menu, star button, toggle and dialog is fully D-pad reachable with a visible focus highlight; soft keyboard and Back behaviour unchanged |
+| **v1.2.0 now-playing focus fix** | Lyric lines are excluded from D-pad focus (they used to steal initial focus, lose all focus after Left/Right, and let OK trigger an off-screen favorites button); the page now focuses the control bar on open and pulls focus back whenever it lands on an invisible node |
+| **v1.2.0 Bilibili cover art** | The left panel now downloads and shows the video cover automatically (async fetch from the cover URL encoded in the proxy URL when `albumArt` is empty), scaled with square `BoxFit.cover` and capped decode size |
+| **v1.2.0 Bilibili audio quality** | No more fixed 360P + first audio track; requests clarity tiers 127 → 80 → 16 and picks the **highest available** track in `dash.audio[]` by Hi-Res / Dolby / bitrate priority |
 
 **2026-11-12: backport from [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
@@ -411,7 +414,7 @@ Full history and anchor tags are preserved:
 | `v1.1.1` | Network playback fixes, Bilibili pagination redesign, play history / favorites, legacy audio format support |
 | `v1.1.2` | Full D-pad navigation audit, music-only recommendations, Bilibili subtitles / lyrics, redesigned branding |
 | `v1.1.2` (later builds) | Now-playing scale restoration and auto-hiding controls, network-drive backport (embedded tags / favourites), D-pad reachability fixes (assets were replaced via `--clobber`) |
-| **`v1.2.0`** | **New read-only Google Drive source (QR pairing, zero typing on TV), pairing page and local auth helper; releases now use dedicated tags** |
+| **`v1.2.0`** | **Dedicated release tags from now on; fixed now-playing D-pad focus (lyric lines stealing focus / focus loss / stray activation of off-screen favorites), Bilibili video cover auto-display with square scaling, highest available Bilibili audio quality** |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor

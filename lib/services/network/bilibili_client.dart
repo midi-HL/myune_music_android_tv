@@ -539,60 +539,106 @@ class BiliClient {
     return null;
   }
 
+  /// B 站 DASH 音频轨的质量优先级（数值越大越优先）。
+  /// 未登录通常只有 30216(64K) / 30232(132K)；登录大会员才会下发
+  /// 30250(杜比全景声) / 30251(Hi-Res FLAC)。未列出的 id 用 bandwidth 兜底。
+  static const Map<int, int> _audioQualityRank = <int, int>{
+    30251: 100, // Hi-Res 无损 FLAC
+    30250: 90, // 杜比全景声
+    30380: 85,
+    30280: 80, // 192K AAC
+    30232: 60, // 132K AAC
+    30216: 10, // 64K AAC
+  };
+
   /// 解析可直接交给 mpv 的 CDN 直链。返回的 URL 由本机代理转发，
   /// 代理会补上 Referer / UA / Cookie 并透传 Range。
+  ///
+  /// 音质：旧实现固定 `qn=16`（360P）且直接取 `dash.audio.first`，
+  /// 永远是服务端返回的第一条（最低码率）音轨。B 站的高码率音频只在
+  /// 较高清晰度请求 / 登录后下发，所以这里按 127 → 80 → 16 依次请求，
+  /// 并在 audio[] 里按 id 优先级 + bandwidth 取**可获取的最高音质**。
   Future<String> streamUrl({
     required String bvid,
     required int cid,
     required BiliStreamMode mode,
   }) async {
     await _ensureIdentity();
-    final params = <String, String>{
-      ..._videoParams(bvid),
-      'cid': cid.toString(),
-      'qn': mode == BiliStreamMode.audio ? '16' : '64',
-      'fnval': mode == BiliStreamMode.audio ? '16' : '0',
-      'fnver': '0',
-      'fourk': '0',
-    };
-    Map<String, dynamic> result;
     try {
       await _ensureWbi();
-      result = await _getJson(
-        Uri.https(
-          'api.bilibili.com',
-          '/x/player/wbi/playurl',
-          _sign(params),
-        ),
-      );
-      if (result['code'] != 0) throw Exception('WBI playurl 被拒绝');
     } catch (_) {
-      result = await _getJson(
-        Uri.https('api.bilibili.com', '/x/player/playurl', params),
-      );
+      // WBI 不可用时退回旧 playurl 接口。
     }
-    if (result['code'] != 0) {
-      throw Exception(
-        '获取播放地址失败（${result['code']}）：${result['message'] ?? ''}',
-      );
-    }
-    final data = result['data'];
-    if (data is! Map) throw Exception('播放地址为空');
 
-    if (mode == BiliStreamMode.audio) {
-      final dash = data['dash'];
-      final audio = dash is Map ? dash['audio'] : null;
-      if (audio is List && audio.isNotEmpty && audio.first is Map) {
-        final url = _pickUrl(audio.first as Map);
-        if (url != null) return url;
+    for (final qn in <String>['127', '80', '16']) {
+      final params = <String, String>{
+        ..._videoParams(bvid),
+        'cid': cid.toString(),
+        'qn': qn,
+        'fnval': mode == BiliStreamMode.audio ? '16' : '0',
+        'fnver': '0',
+        'fourk': qn == '16' ? '0' : '1',
+      };
+      Map<String, dynamic>? result;
+      try {
+        final signed = _sign(params);
+        final candidate = await _getJson(
+          Uri.https('api.bilibili.com', '/x/player/wbi/playurl', signed),
+        );
+        if (candidate['code'] == 0) result = candidate;
+      } catch (_) {
+        // 落回旧接口。
       }
-    }
-    final durl = data['durl'];
-    if (durl is List && durl.isNotEmpty && durl.first is Map) {
-      final url = _pickUrl(durl.first as Map);
+      if (result == null) {
+        try {
+          final candidate = await _getJson(
+            Uri.https('api.bilibili.com', '/x/player/playurl', params),
+          );
+          if (candidate['code'] == 0) result = candidate;
+        } catch (_) {
+          // 继续尝试下一档清晰度。
+        }
+      }
+      if (result == null) continue;
+      final url = _bestStreamUrl(result['data'], mode);
       if (url != null) return url;
     }
     throw Exception('B 站未返回可播放的流地址（可能需要登录或该视频受限）');
+  }
+
+  /// 从 playurl 响应里挑当前模式下**质量最高**的一条流。
+  String? _bestStreamUrl(dynamic data, BiliStreamMode mode) {
+    if (data is! Map) return null;
+    if (mode == BiliStreamMode.audio) {
+      final dash = data['dash'];
+      final audio = dash is Map ? dash['audio'] : null;
+      if (audio is List && audio.isNotEmpty) {
+        final entries = audio.whereType<Map>().toList()
+          ..sort((a, b) => _audioScore(b).compareTo(_audioScore(a)));
+        for (final item in entries) {
+          final url = _pickUrl(item);
+          if (url != null) return url;
+        }
+      }
+    }
+    final durl = data['durl'];
+    if (durl is List && durl.isNotEmpty) {
+      for (final item in durl.whereType<Map>()) {
+        final url = _pickUrl(item);
+        if (url != null) return url;
+      }
+    }
+    return null;
+  }
+
+  int _audioScore(Map item) {
+    int asInt(Object? value) =>
+        value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+    final id = asInt(item['id']);
+    final bandwidth = asInt(item['bandwidth']);
+    // id 优先级为主（杜比 / Hi-Res 的 bandwidth 未必比 192K 大），
+    // 同档位再用实际码率取胜。
+    return (_audioQualityRank[id] ?? 0) * 1000000 + bandwidth;
   }
 
   String? _pickUrl(Map item) {
