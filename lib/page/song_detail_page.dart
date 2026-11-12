@@ -335,9 +335,19 @@ class _SongDetailPageState extends State<SongDetailPage> {
     HardwareKeyboard.instance.addHandler(_keyHandler);
     // 播放页自己声明「焦点该回到哪里」：任何时候焦点落空，都优先拉回控制栏，
     // 不让全局恢复逻辑跳到底层迷你播放条或保活旧页面。
-    TvFocusController.instance.registerRestoreHandler(
-      () => TvFocusController.instance.focusFirstWhere(_inPlaybar),
-    );
+    TvFocusController.instance.registerRestoreHandler(() {
+      final ok = TvFocusController.instance.focusFirstWhere(_inPlaybar);
+      if (!ok) {
+        // 控件栏正在隐藏 / 刚唤醒还没 rebuild：下一帧再试，绝不让全局
+        // _pickLeaf 把焦点扔到底层迷你播放条或旧页面。
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            TvFocusController.instance.focusFirstWhere(_inPlaybar);
+          }
+        });
+      }
+      return true; // 本页负责恢复，不再走全局兜底
+    });
 
     // 播放页是独立全屏 route，打开时若不主动指定焦点，Flutter 会把初始焦点
     // 交给第一个可聚焦控件 —— 实测是右侧歌词行（TextButton）。歌词行每行都
@@ -385,7 +395,15 @@ class _SongDetailPageState extends State<SongDetailPage> {
   }
 
   bool _onHardwareKey(KeyEvent event) {
-    if (event is KeyDownEvent) _handleUserInteraction(_autoHideEnabled);
+    if (event is KeyDownEvent) {
+      _handleUserInteraction(_autoHideEnabled);
+      // HardwareKeyboard handler 在按键派发链最前面（早于 Shortcuts/Actions
+      // 与按钮激活）。每次按下先同步确认焦点仍在控制栏：控件栏隐藏 / 按到
+      // 边界时焦点可能落到 rootScope 或整页容器，若不在这里拉回，同一个按键
+      // 的 OK 就可能激活旧页面按钮，方向键也会整页无高亮。焦点有效时该调用
+      // 是 no-op，不影响正常几何导航。
+      TvFocusController.instance.restoreFocusNow();
+    }
     return false;
   }
 

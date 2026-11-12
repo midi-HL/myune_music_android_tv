@@ -144,13 +144,7 @@ class TvFocusController {
   /// 才用当前页面注册的目标拉回，失败再退回全局可见候选。
   bool restoreFocusNow() {
     final manager = FocusManager.instance;
-    final focus = manager.primaryFocus;
-    final valid = focus != null &&
-        focus != manager.rootScope &&
-        focus.context != null &&
-        focus.context!.mounted &&
-        rectOf(focus) != null;
-    if (valid) return true;
+    if (isValidFocus(manager.primaryFocus)) return true;
     final handler = _restoreHandler;
     if (handler != null) {
       try {
@@ -239,6 +233,20 @@ class TvFocusController {
     });
   }
 
+  /// 焦点是否是一个「用户看得见、按 OK 有意义」的具体控件。
+  /// 整页级容器（宽 >= 85% 或高 >= 80% 屏幕）虽然 rectOf 有效，但把焦点
+  /// 放在上面只会表现为整页无高亮，必须当作无效重新恢复。
+  static bool isValidFocus(FocusNode? focus) {
+    if (focus == null || focus == FocusManager.instance.rootScope) return false;
+    final context = focus.context;
+    if (context == null || !context.mounted) return false;
+    final rect = rectOf(focus);
+    if (rect == null) return false;
+    final screen = screenSize();
+    return rect.width < screen.width * 0.85 &&
+        rect.height < screen.height * 0.80;
+  }
+
   /// 同步保证「当前焦点一定是一个可见控件」。
   ///
   /// 方向键走到边界（例如控制栏第一个按钮再按 UP）时两个方向的
@@ -248,14 +256,7 @@ class TvFocusController {
   /// 遥控器 / 手柄任何时刻都有明确落点。
   bool ensureValidFocus() {
     final manager = FocusManager.instance;
-    final focus = manager.primaryFocus;
-    if (focus != null &&
-        focus != manager.rootScope &&
-        focus.context != null &&
-        focus.context!.mounted &&
-        rectOf(focus) != null) {
-      return true;
-    }
+    if (isValidFocus(manager.primaryFocus)) return true;
     final candidates = collectCandidates(manager.rootScope);
     if (candidates.isEmpty) return false;
     _pickLeaf(candidates).requestFocus();
@@ -322,8 +323,12 @@ class TvFocusController {
     final screen = screenSize();
     final usable = candidates.where((c) {
       if (c.rect.width <= 0 || c.rect.height <= 0) return false;
-      if (c.rect.width >= screen.width * 0.92 &&
-          c.rect.height >= screen.height * 0.88) {
+      // 严格排除整页级容器：只按「宽 >= 92% 且 高 >= 88%」过滤太松，
+      // 像 (0,0,960,473)（宽 100%、高 87.6%）这种主内容容器会漏进来，
+      // 恢复焦点时 top=0 排最前被选中，导致焦点落到整屏 FrameLayout，
+      // 表现为「整页无任何高亮、OK 乱触发」。任一维度过大就排除。
+      if (c.rect.width >= screen.width * 0.85 ||
+          c.rect.height >= screen.height * 0.80) {
         return false;
       }
       return true;
@@ -955,19 +960,9 @@ class _TvFocusScopeState extends State<TvFocusScope> {
   }
 
   void _guardPrimaryFocus() {
-    final manager = FocusManager.instance;
-    final focus = manager.primaryFocus;
-    // 焦点彻底落空（rootScope / null）时同样要恢复：否则下一次 OK 会激活
+    // 焦点落空、落到不可见节点或整页级容器时都要恢复：否则下一次 OK 会激活
     // 树里残留的旧页面按钮，实测会弹出「已收藏 / 已取消收藏」。
-    if (focus == null || focus == manager.rootScope) {
-      TvFocusController.instance.restoreFocusNow();
-      return;
-    }
-    if (focus.context == null || !focus.context!.mounted) {
-      TvFocusController.instance.restoreFocusNow();
-      return;
-    }
-    if (TvFocusController.rectOf(focus) == null) {
+    if (!TvFocusController.isValidFocus(FocusManager.instance.primaryFocus)) {
       TvFocusController.instance.restoreFocusNow();
     }
   }
