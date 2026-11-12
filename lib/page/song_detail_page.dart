@@ -341,14 +341,19 @@ class _SongDetailPageState extends State<SongDetailPage> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        TvFocusController.instance.scheduleFocusWhere(
-          (context) =>
-              context.findAncestorWidgetOfExactType<Playbar>() != null ||
-              context.findAncestorWidgetOfExactType<PortraitPlaybar>() != null,
-        );
+        // 同步生效，避免被焦点调度队列的防抖吞掉。
+        final ok = TvFocusController.instance.focusFirstWhere(_inPlaybar);
+        if (!ok) {
+          TvFocusController.instance.scheduleFocusWhere(_inPlaybar);
+        }
       });
     });
   }
+
+  /// 播放控制栏（横屏 Playbar / 竖屏 PortraitPlaybar）内的可聚焦控件。
+  static bool _inPlaybar(BuildContext context) =>
+      context.findAncestorWidgetOfExactType<Playbar>() != null ||
+      context.findAncestorWidgetOfExactType<PortraitPlaybar>() != null;
 
   /// 网络媒体封面：优先用 Song 已带的 albumArt；否则按代理 URL 里的封面地址
   /// 异步下载并回填。失败 / 无封面时保持占位，不阻断播放。
@@ -401,6 +406,12 @@ class _SongDetailPageState extends State<SongDetailPage> {
     if (_isHidden) {
       setState(() {
         _isHidden = false;
+      });
+      // 控件栏隐藏时按钮会退出语义树、焦点随之落空。唤醒后立刻同步把焦点
+      // 放回控制栏，保证「按任意键 → 控件栏出现 → 方向键可继续操作」连贯，
+      // 不会出现整页无高亮或 OK 误触旧页面按钮。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) TvFocusController.instance.focusFirstWhere(_inPlaybar);
       });
     }
     _startTimer();

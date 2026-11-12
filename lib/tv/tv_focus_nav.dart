@@ -184,7 +184,12 @@ class TvFocusController {
     scheduleFocusInDrawer();
   }
 
+  bool Function(BuildContext)? _pendingWhere;
+
   void _schedule(bool Function(BuildContext)? where, {bool force = false}) {
+    // 同一帧里多个来源同时请求恢复焦点时，保留「最后一次带目标」的请求，
+    // 而不是被 _scheduled 直接丢掉（播放页初始焦点曾被这样吞掉）。
+    _pendingWhere = where ?? _pendingWhere;
     _pendingForce = _pendingForce || force;
     if (_scheduled) return;
     _scheduled = true;
@@ -193,10 +198,31 @@ class TvFocusController {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _scheduled = false;
         final pendingForce = _pendingForce;
+        final pendingWhere = _pendingWhere;
         _pendingForce = false;
-        _apply(where, force: pendingForce);
+        _pendingWhere = null;
+        _apply(pendingWhere, force: pendingForce);
       });
     });
+  }
+
+  /// 同步把焦点放到满足 [where] 的候选里视觉最靠前的一个。
+  /// 用于「页面刚打开 / 控件栏刚从隐藏恢复」这类必须立刻生效的场景，
+  /// 不受 _schedule 两帧延迟影响。
+  bool focusFirstWhere(bool Function(BuildContext) where) {
+    final matched = collectCandidates(FocusManager.instance.rootScope)
+        .where((candidate) {
+      final context = candidate.node.context;
+      if (context == null || !context.mounted) return false;
+      try {
+        return where(context);
+      } catch (_) {
+        return false;
+      }
+    }).toList();
+    if (matched.isEmpty) return false;
+    _pickLeaf(matched).requestFocus();
+    return true;
   }
 
   void _apply(bool Function(BuildContext)? where, {bool force = false}) {
@@ -875,8 +901,16 @@ class _TvFocusScopeState extends State<TvFocusScope> {
   void _guardPrimaryFocus() {
     final manager = FocusManager.instance;
     final focus = manager.primaryFocus;
-    if (focus == null || focus == manager.rootScope) return;
-    if (focus.context == null || !focus.context!.mounted) return;
+    // 焦点彻底落空（rootScope / null）时同样要恢复：否则下一次 OK 会激活
+    // 树里残留的旧页面按钮，实测会弹出「已收藏 / 已取消收藏」。
+    if (focus == null || focus == manager.rootScope) {
+      TvFocusController.instance.scheduleRestoreFocus();
+      return;
+    }
+    if (focus.context == null || !focus.context!.mounted) {
+      TvFocusController.instance.scheduleRestoreFocus();
+      return;
+    }
     if (TvFocusController.rectOf(focus) == null) {
       TvFocusController.instance.scheduleRestoreFocus();
     }
