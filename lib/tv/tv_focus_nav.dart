@@ -390,9 +390,12 @@ class TvFocusController {
         continue;
       }
       if (!candidate.rect.overlaps(scrollReach)) continue;
-      // 跳过整页级大容器。
-      if (candidate.rect.width >= screen.width * 0.92 &&
-          candidate.rect.height >= screen.height * 0.88) {
+      // 跳过整页 / 整列级大容器。旧规则要求「宽 >= 92% 且 高 >= 88%」，
+      // 像左侧栏 (0,0,77,473)（高 87.6%）会漏进来：从控制栏最左按钮按
+      // LEFT 时它被当成「左侧候选」，焦点落到没有高亮的容器上，表现为
+      // 整页突然没有焦点。与 _pickLeaf / isValidFocus 保持同一套阈值。
+      if (candidate.rect.width >= screen.width * 0.85 ||
+          candidate.rect.height >= screen.height * 0.80) {
         continue;
       }
       // 跳过完全包住当前控件的祖先容器。
@@ -471,7 +474,12 @@ class TvFocusController {
       }
     }
 
-    if (best == null) return false;
+    if (best == null) {
+      // 到边界时明确把焦点按回当前控件，避免框架把 focus 还给 rootScope
+      // 或残留在一个没有高亮的容器上（表现为「按了一下就整页没焦点」）。
+      current.requestFocus();
+      return false;
+    }
     best.node.requestFocus();
     _ensureVisible(best.node);
     return true;
