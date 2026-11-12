@@ -398,11 +398,18 @@ class _SongDetailPageState extends State<SongDetailPage> {
     if (event is KeyDownEvent) {
       _handleUserInteraction(_autoHideEnabled);
       // HardwareKeyboard handler 在按键派发链最前面（早于 Shortcuts/Actions
-      // 与按钮激活）。每次按下先同步确认焦点仍在控制栏：控件栏隐藏 / 按到
-      // 边界时焦点可能落到 rootScope 或整页容器，若不在这里拉回，同一个按键
-      // 的 OK 就可能激活旧页面按钮，方向键也会整页无高亮。焦点有效时该调用
-      // 是 no-op，不影响正常几何导航。
-      TvFocusController.instance.restoreFocusNow();
+      // 与按钮激活）。直接按 widget 树判断「焦点是否仍在播放控制栏内」，
+      // 不依赖语义树 / rect 大小：按 UP/LEFT 到边界、控件栏隐藏后唤醒、
+      // 焦点误落到歌词行 / 进度条 / 整页容器 / 保活旧页面时，都在这里同步
+      // 拉回控制栏。焦点本来就在控制栏内时不做任何事，几何导航照常移动。
+      final focus = FocusManager.instance.primaryFocus;
+      final context = focus?.context;
+      final inBar = context != null && context.mounted && _inPlaybar(context);
+      if (!inBar) {
+        TvFocusController.instance.focusFirstWhere(_inPlaybar);
+      } else {
+        TvFocusController.instance.restoreFocusNow();
+      }
     }
     return false;
   }
