@@ -282,6 +282,53 @@ class TvFocusController {
     return true;
   }
 
+  /// 只在满足 [inScope] 的候选之间做「同一行左右移动」。
+  ///
+  /// 上下方向**保持当前焦点不动**；焦点不在集合内时落到第一个。
+  /// 供播放页这类「只有一行控件、上方没有任何可聚焦内容」的页面接管方向键：
+  /// 全局几何导航在 UP 找不到候选时会把焦点交还框架，触发恢复 / 守卫连锁，
+  /// 实测会落到无语义容器上（整页无高亮、后续方向键全部失效）。
+  bool stepWithinScopedRow(
+    TraversalDirection direction,
+    bool Function(BuildContext) inScope,
+  ) {
+    final manager = FocusManager.instance;
+    final screen = screenSize();
+    final row = collectCandidates(manager.rootScope).where((c) {
+      final context = c.node.context;
+      if (context == null || !context.mounted) return false;
+      if (c.rect.width >= screen.width * 0.85 ||
+          c.rect.height >= screen.height * 0.80) {
+        return false;
+      }
+      try {
+        return inScope(context);
+      } catch (_) {
+        return false;
+      }
+    }).toList()
+      ..sort((a, b) {
+        final rowDiff = (a.rect.top - b.rect.top).abs();
+        if (rowDiff > 12.0) return a.rect.top.compareTo(b.rect.top);
+        return a.rect.left.compareTo(b.rect.left);
+      });
+    if (row.isEmpty) return false;
+    final current = manager.primaryFocus;
+    final index = row.indexWhere((c) => c.node == current);
+    if (index < 0) {
+      row.first.node.requestFocus();
+      return true;
+    }
+    if (direction == TraversalDirection.left && index > 0) {
+      row[index - 1].node.requestFocus();
+    } else if (direction == TraversalDirection.right &&
+        index < row.length - 1) {
+      row[index + 1].node.requestFocus();
+    }
+    // up / down：什么都不做，焦点保持在这一行的按钮上。
+    return true;
+  }
+
   void _apply(bool Function(BuildContext)? where, {bool force = false}) {
     final manager = FocusManager.instance;
     final candidates = collectCandidates(manager.rootScope);

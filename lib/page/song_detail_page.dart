@@ -394,22 +394,40 @@ class _SongDetailPageState extends State<SongDetailPage> {
     }());
   }
 
+  static TraversalDirection? _directionOf(LogicalKeyboardKey key) {
+    if (key == LogicalKeyboardKey.arrowUp) return TraversalDirection.up;
+    if (key == LogicalKeyboardKey.arrowDown) return TraversalDirection.down;
+    if (key == LogicalKeyboardKey.arrowLeft) return TraversalDirection.left;
+    if (key == LogicalKeyboardKey.arrowRight) return TraversalDirection.right;
+    return null;
+  }
+
   bool _onHardwareKey(KeyEvent event) {
-    if (event is KeyDownEvent) {
-      _handleUserInteraction(_autoHideEnabled);
-      // HardwareKeyboard handler 在按键派发链最前面（早于 Shortcuts/Actions
-      // 与按钮激活）。直接按 widget 树判断「焦点是否仍在播放控制栏内」，
-      // 不依赖语义树 / rect 大小：按 UP/LEFT 到边界、控件栏隐藏后唤醒、
-      // 焦点误落到歌词行 / 进度条 / 整页容器 / 保活旧页面时，都在这里同步
-      // 拉回控制栏。焦点本来就在控制栏内时不做任何事，几何导航照常移动。
-      final focus = FocusManager.instance.primaryFocus;
-      final context = focus?.context;
-      final inBar = context != null && context.mounted && _inPlaybar(context);
-      if (!inBar) {
-        TvFocusController.instance.focusFirstWhere(_inPlaybar);
-      } else {
-        TvFocusController.instance.restoreFocusNow();
-      }
+    if (event is! KeyDownEvent) return false;
+    _handleUserInteraction(_autoHideEnabled);
+
+    final focus = FocusManager.instance.primaryFocus;
+    final context = focus?.context;
+    final inBar = context != null && context.mounted && _inPlaybar(context);
+    // 播放队列抽屉 / 歌词设置抽屉等浮层打开时，焦点不在控制栏，
+    // 方向键交回全局几何导航，不干扰浮层内部操作。
+    if (!inBar) return false;
+
+    final direction = _directionOf(event.logicalKey);
+    if (direction != null) {
+      // 播放控制栏只有一行按钮，上方没有任何可聚焦内容。全局几何导航在
+      // UP 找不到候选时会把焦点交还框架，触发恢复 / 守卫连锁，实测会把
+      // 焦点落到无语义的整页容器上（整页无高亮、后续方向键全部失效）。
+      // 因此播放页自己接管方向键：左右只在按钮行内移动，上下保持不动，
+      // 行为完全确定，并吞掉按键阻止 Shortcuts/Actions 二次处理。
+      TvFocusController.instance.stepWithinScopedRow(direction, _inPlaybar);
+      return true;
+    }
+
+    // 非方向键（OK / 媒体键）照常派发；只在焦点本身无效时兜底拉回控制栏，
+    // 避免 OK 激活保活旧页面的收藏按钮。抽屉里的有效焦点不受影响。
+    if (!TvFocusController.isValidFocus(focus)) {
+      TvFocusController.instance.focusFirstWhere(_inPlaybar);
     }
     return false;
   }
