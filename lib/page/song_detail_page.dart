@@ -23,6 +23,37 @@ import '../services/network/remote_media_registry.dart';
 import '../widgets/ui_scale_scope.dart';
 import 'playlist/playlist_models.dart';
 
+/// 播放控制栏（横屏 Playbar / 竖屏 PortraitPlaybar）内的可聚焦控件。
+bool _inPlaybar(BuildContext context) =>
+    context.findAncestorWidgetOfExactType<Playbar>() != null ||
+    context.findAncestorWidgetOfExactType<PortraitPlaybar>() != null;
+
+/// 播放页方向键：控制栏只有一行按钮，上方没有任何可聚焦内容。
+/// 全局几何导航在 UP 找不到候选时会把焦点交还框架，触发恢复 / 守卫连锁，
+/// 真机与 MuMu 均复现「整页无高亮、后续方向键全部失效」。
+/// 用页面级 Shortcuts/Actions 就近接管，行为完全确定，不依赖逻辑键名匹配。
+class _PlayPageArrowIntent extends Intent {
+  const _PlayPageArrowIntent(this.direction);
+
+  final TraversalDirection direction;
+}
+
+class _PlayPageArrowAction extends Action<_PlayPageArrowIntent> {
+  @override
+  Object? invoke(_PlayPageArrowIntent intent) {
+    final focus = FocusManager.instance.primaryFocus;
+    final context = focus?.context;
+    final inBar = context != null && context.mounted && _inPlaybar(context);
+    if (!inBar) {
+      // 播放队列抽屉 / 歌词设置抽屉等浮层打开时，交回全局几何导航。
+      return KeyEventResult.ignored;
+    }
+    // 左右只在控制栏按钮行内移动；上下保持不动，永不离开这一行。
+    TvFocusController.instance.stepWithinScopedRow(intent.direction, _inPlaybar);
+    return KeyEventResult.handled;
+  }
+}
+
 // 公共模糊背景组件
 class BackgroundBlurWidget extends StatefulWidget {
   final Widget child;
@@ -365,11 +396,6 @@ class _SongDetailPageState extends State<SongDetailPage> {
     });
   }
 
-  /// 播放控制栏（横屏 Playbar / 竖屏 PortraitPlaybar）内的可聚焦控件。
-  static bool _inPlaybar(BuildContext context) =>
-      context.findAncestorWidgetOfExactType<Playbar>() != null ||
-      context.findAncestorWidgetOfExactType<PortraitPlaybar>() != null;
-
   /// 网络媒体封面：优先用 Song 已带的 albumArt；否则按代理 URL 里的封面地址
   /// 异步下载并回填。失败 / 无封面时保持占位，不阻断播放。
   void _ensureArtwork(Song? song) {
@@ -394,40 +420,20 @@ class _SongDetailPageState extends State<SongDetailPage> {
     }());
   }
 
-  static TraversalDirection? _directionOf(LogicalKeyboardKey key) {
-    if (key == LogicalKeyboardKey.arrowUp) return TraversalDirection.up;
-    if (key == LogicalKeyboardKey.arrowDown) return TraversalDirection.down;
-    if (key == LogicalKeyboardKey.arrowLeft) return TraversalDirection.left;
-    if (key == LogicalKeyboardKey.arrowRight) return TraversalDirection.right;
-    return null;
-  }
-
+  /// 方向键由页面内的 [_PlayPageDirectionalAction] 通过
+  /// TvDirectionalFocusIntent 直接接管（不依赖按逻辑键名匹配，避免某些遥控器
+  /// / 手柄 / 模拟器把 UP 映射成不同 logicalKey 时漏接）。
+  /// 这里只负责「任意按键唤醒控件栏」与「焦点无效时兜底」，始终不吞键。
   bool _onHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     _handleUserInteraction(_autoHideEnabled);
-
     final focus = FocusManager.instance.primaryFocus;
-    final context = focus?.context;
-    final inBar = context != null && context.mounted && _inPlaybar(context);
-    // 播放队列抽屉 / 歌词设置抽屉等浮层打开时，焦点不在控制栏，
-    // 方向键交回全局几何导航，不干扰浮层内部操作。
-    if (!inBar) return false;
-
-    final direction = _directionOf(event.logicalKey);
-    if (direction != null) {
-      // 播放控制栏只有一行按钮，上方没有任何可聚焦内容。全局几何导航在
-      // UP 找不到候选时会把焦点交还框架，触发恢复 / 守卫连锁，实测会把
-      // 焦点落到无语义的整页容器上（整页无高亮、后续方向键全部失效）。
-      // 因此播放页自己接管方向键：左右只在按钮行内移动，上下保持不动，
-      // 行为完全确定，并吞掉按键阻止 Shortcuts/Actions 二次处理。
-      TvFocusController.instance.stepWithinScopedRow(direction, _inPlaybar);
-      return true;
-    }
-
-    // 非方向键（OK / 媒体键）照常派发；只在焦点本身无效时兜底拉回控制栏，
-    // 避免 OK 激活保活旧页面的收藏按钮。抽屉里的有效焦点不受影响。
     if (!TvFocusController.isValidFocus(focus)) {
-      TvFocusController.instance.focusFirstWhere(_inPlaybar);
+      final context = focus?.context;
+      // 抽屉 / 对话框里的有效焦点不打扰；只有焦点真的落空才拉回控制栏。
+      if (context == null || !context.mounted || !_inPlaybar(context)) {
+        TvFocusController.instance.restoreFocusNow();
+      }
     }
     return false;
   }
@@ -511,7 +517,25 @@ class _SongDetailPageState extends State<SongDetailPage> {
     // 都与桌面端一致，不会再出现整体偏小、控件栏过细的问题。
     final double scale = playPageScale(context);
 
-    return Listener(
+    // 播放页方向键就近接管：Shortcuts 必须放在 Actions 之下（同 TvFocusScope
+    // 的结构），控件栏内方向键完全由 _PlayPageArrowAction 处理；抽屉 / 浮层
+    // 里返回 ignored，事件继续冒泡到全局 TvDirectionalFocusAction。
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.arrowUp):
+            _PlayPageArrowIntent(TraversalDirection.up),
+        SingleActivator(LogicalKeyboardKey.arrowDown):
+            _PlayPageArrowIntent(TraversalDirection.down),
+        SingleActivator(LogicalKeyboardKey.arrowLeft):
+            _PlayPageArrowIntent(TraversalDirection.left),
+        SingleActivator(LogicalKeyboardKey.arrowRight):
+            _PlayPageArrowIntent(TraversalDirection.right),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          _PlayPageArrowIntent: _PlayPageArrowAction(),
+        },
+        child: Listener(
       onPointerDown: (_) => _handleUserInteraction(autoHideEnabled),
       onPointerMove: (_) => _handleUserInteraction(autoHideEnabled),
       onPointerHover: (_) => _handleUserInteraction(autoHideEnabled),
@@ -976,6 +1000,8 @@ class _SongDetailPageState extends State<SongDetailPage> {
             ),
           ),
           drawer: const LyricsSettingsDrawer(),
+        ),
+      ),
         ),
       ),
     );
