@@ -37,10 +37,10 @@
 
 ## 0. 本次更新与功能总览
 
-### 0.1 本版（v1.2.0）更新了什么
+### 0.1 本版（v1.3.0）更新了什么
 
 > 采用语义化版本：新增功能升 minor、只修 bug 升 patch，每次发版**新建独立 tag / Release**
-> （`v1.0.0` → `v1.1.0` → `v1.1.1` → `v1.1.2` → **`v1.2.0`**）。
+> （`v1.0.0` → `v1.1.0` → `v1.1.1` → `v1.1.2` → `v1.2.0` → **`v1.3.0`**）。
 > 这样应用内「检查更新」能通过 `/releases/latest` 感知到新版本，也能随时回滚到任一构建。
 > 具体**缺陷修复清单**写在对应版本的 Release 发布说明里。
 
@@ -55,6 +55,7 @@
 | **v1.2.0 播放页焦点修复** | 歌词行退出 D-pad 焦点链（原会抢初始焦点、左右键后整页丢焦点、OK 误触旧页面收藏按钮）；打开播放页主动把焦点落到播放控制栏；焦点落到不可见节点时立即拉回当前页面 |
 | **v1.2.0 B 站封面** | 播放页左侧自动下载并显示视频封面（`albumArt` 为空时按代理 URL 里的封面地址异步获取），按封面方形 `BoxFit.cover` 缩放并限制解码尺寸 |
 | **v1.2.0 B 站音质** | 不再固定 360P + 取第一条音轨；按 127 → 80 → 16 档清晰度依次请求，在 `dash.audio[]` 里按 Hi-Res / 杜比 / 码率优先级取**可获取的最高音质** |
+| **v1.3.0 只读 Google Drive** | 新增第四种网络源；局域网扫码配对（电视零打字）、`drive.readonly` 只读、本地授权脚本 `tools/gdrive_auth.py`、凭据只存电视本机；与 WebDAV / FTP 共用浏览 / 播放 / 收藏 / 元信息链路 |
 
 **2026-11-12：反哺 [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
@@ -119,7 +120,7 @@ Android TV 启动器共用；TV 桌面另有 320×180 横幅。
 | 上游原文说明 | [UPSTREAM_README.md](UPSTREAM_README.md)（原样保留） |
 | **本改版开源仓库** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | 本改版协议 | **Apache License 2.0**（与上游一致） |
-| 本改版版本 | `1.2.0`（见 `lib/tv/tv_app_info.dart`） |
+| 本改版版本 | `1.3.0`（见 `lib/tv/tv_app_info.dart`） |
 
 本仓库**保留了上游完整提交历史**（未 squash、未改写），所有改版内容以新增提交与 tag 形式记录，
 可随时回滚。改动清单见 [NOTICE](NOTICE) 与 [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)。
@@ -223,7 +224,7 @@ SAF 文件访问、TV 桌面入口与品牌、遥控器 / 键盘 / 手柄输入�
 
 完整的逐轮修复记录与回滚锚点见 [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)。
 
-## 7. 网络媒体（WebDAV / FTP / 哔哩哔哩）
+## 7. 网络媒体（WebDAV / FTP / Google Drive / 哔哩哔哩）
 
 解决电视本地容量有限、无法保存全部音乐的问题：**按需拉流、不落盘**，远端文件只在播放时
 经本机代理读取，不占用电视存储。入口在主导航「网络媒体」，下分两个标签。
@@ -245,6 +246,50 @@ SAF 文件访问、TV 桌面入口与品牌、遥控器 / 键盘 / 手柄输入�
 - **首包与 URL 稳定性**：WebDAV 首包超时 45 秒（小于 mpv 60 秒），避免自建网盘桥首包慢
   导致 `loading failed`；网络代理 URL 不再被路径规范化破坏，封面加载稳定。
 - 密码只保存在本机 `SharedPreferences`，不随仓库提交、不写日志。
+
+### 7.1b 只读 Google Drive（扫码配对）
+
+**只读**：只请求 `drive.readonly`，不提供上传 / 新建 / 重命名 / 删除，绝不改动云端文件。
+
+为什么用「扫码传凭据」而不是电视上登录：
+
+- Android TV / 盒子通常没有系统浏览器，桌面版的 loopback OAuth 打不开授权页；
+- Google 的**设备码流程**（TV 显示短码、手机输码）只允许 `drive.file` /
+  `drive.appdata` 等有限 scope，**不支持 `drive.readonly`**，读不到已有音乐库；
+- Google 的 token 接口不允许浏览器直连（CORS）、OOB 回调已停用、私网 IP 也不能
+  登记为 redirect_uri，纯网页拿不到长期 `refresh_token`。
+
+因此采用**局域网配对**：电视显示二维码，手机 / 电脑在同一 WiFi 下打开配页，
+凭据直接 POST 到电视本机，**不经过任何第三方服务**；电视上一个字都不用打。
+配对服务只在对话框打开期间监听，关闭即停，并用一次性配对码防止误提交。
+
+配置步骤（一次性，约 3 分钟）：
+
+1. 到 [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+   创建 OAuth 客户端，类型选「**桌面应用**」(Desktop app)，记下 `client_id`
+   与 `client_secret`。
+2. 在 OAuth 同意屏幕启用 Google Drive API，把
+   `https://www.googleapis.com/auth/drive.readonly` 加入测试范围，
+   并把你自己的 Google 账号加进「**测试用户**」（未做 OAuth 验证的应用要求）。
+3. 电视上进入「网络媒体 → 网络硬盘 → **添加 Google Drive**」，会显示二维码、
+   局域网地址与 6 位配对码。
+4. 在电脑上执行（Python 3 标准库，零依赖）：
+
+   ```bash
+   python tools/gdrive_auth.py \
+     --client-id "xxxx.apps.googleusercontent.com" \
+     --client-secret "GOCSPX-xxxx" \
+     --pair-url "http://192.168.1.20:18780/?pair=AB3D7K"
+   ```
+
+   浏览器会打开 Google 登录页；同意后脚本自动把 `refresh_token` 推给电视。
+   `--pair-url` 就是二维码内容，也可直接扫二维码后把地址贴进来。
+5. 电视显示「配对成功 + 账号」，按「完成」即可。之后选中该源浏览云端硬盘，
+   与 WebDAV / FTP 一样支持播放、加入队列、星标收藏与内嵌标签 / 封面读取。
+
+> 也可用 [Google OAuth Playground](https://developers.google.com/oauthplayground/)
+> 手动生成 `refresh_token`，再在配对页里填写。凭据只存在电视本机
+> `SharedPreferences`，不写日志、不随仓库提交。需要设备能访问 Google。
 
 ### 7.2 哔哩哔哩
 
@@ -360,6 +405,7 @@ keystore 与密码不进入仓库。
 | `v1.1.2` | 十字方向键全链路复核、推荐限定音乐区、B 站字幕 / 歌词显示、全新品牌图标 |
 | `v1.1.2`（后续累积） | 播放页尺寸还原与自动隐藏控件栏、网络硬盘反哺（内嵌标签 / 收藏分类）、遥控器可达性修复（曾以 `--clobber` 覆盖同名资产） |
 | **`v1.2.0`** | **起改用独立 tag 发版；修复播放页 D-pad 焦点（歌词行抢焦点 / 焦点丢失 / 误触旧页面收藏）、B 站视频封面自动显示并方形缩放、B 站音频流取可获取的最高音质** |
+| **`v1.3.0`** | **新增只读 Google Drive 源：局域网扫码配对、电视零打字、本地授权脚本；含模型 / 代理 / 服务层 / TV 入口与中英文档** |
 
 ```bash
 git checkout tv-v4-focus-fix      # 回到某个锚点

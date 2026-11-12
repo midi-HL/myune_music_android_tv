@@ -8,17 +8,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// 用户口述的「名称以 web 开头的协议」按网络硬盘场景解释为 WebDAV
 /// （Web Distributed Authoring and Versioning），这是 NAS / 共享网盘最常用
 /// 的 HTTP 文件协议；另一种按用户要求支持 FTP。
-enum RemoteSourceType { webdav, ftp }
+enum RemoteSourceType { webdav, ftp, googleDrive }
 
 String remoteSourceTypeLabel(RemoteSourceType type) {
   return switch (type) {
     RemoteSourceType.webdav => 'WebDAV',
     RemoteSourceType.ftp => 'FTP',
+    RemoteSourceType.googleDrive => 'Google Drive（只读）',
   };
 }
 
 RemoteSourceType remoteSourceTypeFromName(String? name) {
-  return name == 'ftp' ? RemoteSourceType.ftp : RemoteSourceType.webdav;
+  return switch (name) {
+    'ftp' => RemoteSourceType.ftp,
+    'googleDrive' || 'gdrive' || 'gd' => RemoteSourceType.googleDrive,
+    _ => RemoteSourceType.webdav,
+  };
 }
 
 /// 一条网络音乐源连接配置。密码仅保存在本机 shared_preferences，
@@ -34,6 +39,10 @@ class RemoteSource {
     this.username = '',
     this.password = '',
     this.useTls = false,
+    this.clientId = '',
+    this.clientSecret = '',
+    this.refreshToken = '',
+    this.rootFolderId = '',
   });
 
   final String id;
@@ -46,10 +55,20 @@ class RemoteSource {
   final String password;
   final bool useTls;
 
+  /// Google Drive 只读源专用（其余字段对 GDrive 无意义，保持空值）。
+  /// 凭据只保存在本机 shared_preferences，不随仓库提交、不写日志。
+  final String clientId;
+  final String clientSecret;
+  final String refreshToken;
+  final String rootFolderId;
+
+  bool get isGoogleDrive => type == RemoteSourceType.googleDrive;
+
   static int defaultPort(RemoteSourceType type, bool useTls) {
     return switch (type) {
       RemoteSourceType.webdav => useTls ? 443 : 80,
       RemoteSourceType.ftp => 21,
+      RemoteSourceType.googleDrive => 443,
     };
   }
 
@@ -77,6 +96,10 @@ class RemoteSource {
   }
 
   String get displaySubtitle {
+    if (isGoogleDrive) {
+      final root = rootFolderId.trim();
+      return 'Google Drive · ${root.isEmpty ? '我的云端硬盘' : root}';
+    }
     final scheme = type == RemoteSourceType.webdav
         ? (useTls ? 'https' : 'http')
         : 'ftp';
@@ -92,6 +115,10 @@ class RemoteSource {
     String? username,
     String? password,
     bool? useTls,
+    String? clientId,
+    String? clientSecret,
+    String? refreshToken,
+    String? rootFolderId,
   }) {
     return RemoteSource(
       id: id,
@@ -103,6 +130,10 @@ class RemoteSource {
       username: username ?? this.username,
       password: password ?? this.password,
       useTls: useTls ?? this.useTls,
+      clientId: clientId ?? this.clientId,
+      clientSecret: clientSecret ?? this.clientSecret,
+      refreshToken: refreshToken ?? this.refreshToken,
+      rootFolderId: rootFolderId ?? this.rootFolderId,
     );
   }
 
@@ -116,6 +147,10 @@ class RemoteSource {
         'username': username,
         'password': password,
         'useTls': useTls,
+        'clientId': clientId,
+        'clientSecret': clientSecret,
+        'refreshToken': refreshToken,
+        'rootFolderId': rootFolderId,
       };
 
   factory RemoteSource.fromJson(Map<String, dynamic> json) {
@@ -132,6 +167,10 @@ class RemoteSource {
       username: (json['username'] as String?) ?? '',
       password: (json['password'] as String?) ?? '',
       useTls: useTls,
+      clientId: (json['clientId'] as String?) ?? '',
+      clientSecret: (json['clientSecret'] as String?) ?? '',
+      refreshToken: (json['refreshToken'] as String?) ?? '',
+      rootFolderId: (json['rootFolderId'] as String?) ?? '',
     );
   }
 }
@@ -160,7 +199,11 @@ class RemoteSourceStore {
         final decoded = jsonDecode(item);
         if (decoded is Map<String, dynamic>) {
           final source = RemoteSource.fromJson(decoded);
-          if (source.id.isNotEmpty && source.host.isNotEmpty) {
+          // GDrive 源没有 host，用凭据是否存在作为有效性判据。
+          final usable = source.isGoogleDrive
+              ? source.clientId.isNotEmpty && source.refreshToken.isNotEmpty
+              : source.host.isNotEmpty;
+          if (source.id.isNotEmpty && usable) {
             _sources.add(source);
           }
         }

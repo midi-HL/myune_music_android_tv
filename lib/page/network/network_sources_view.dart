@@ -13,6 +13,7 @@ import '../../services/network/network_tag_reader.dart';
 import '../../services/network/remote_entry.dart';
 import '../../services/network/remote_source.dart';
 import '../../services/network/remote_stream.dart';
+import 'google_drive_pairing.dart';
 import 'tv_network_widgets.dart';
 
 /// 「网络硬盘 / 共享网盘」标签页。
@@ -105,6 +106,25 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
     }
   }
 
+  /// 扫码添加一个只读 Google Drive 源。
+  /// 电视显示二维码 / 局域网配页，手机或电脑提交 client_id /
+  /// refresh_token 后由配对服务校验并直接落库，电视上不需要输入任何长串。
+  Future<void> _addGoogleDriveSource() async {
+    final result = await showDrivePairingDialog(context);
+    if (result == null) return;
+    final id = 'gd-${DateTime.now().microsecondsSinceEpoch}';
+    await RemoteSourceStore.instance.upsert(result.toSource(id));
+    _refreshSources();
+    if (mounted) {
+      await showTvAlert(
+        context,
+        '已添加「${result.toSource(id).name}」（只读）\n'
+        '${result.account.isEmpty ? '' : '账号：${result.account}\n'}'
+        '选中后即可浏览云端硬盘里的音频',
+      );
+    }
+  }
+
   Future<void> _editSource() async {
     final active = _active ?? _selectedSource;
     if (active == null) {
@@ -179,7 +199,10 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       if (!mounted) return;
       setState(() {
         _entries = entries;
-        _artworkUrl = NetworkMediaService.directoryArtworkUrl(source, entries);
+        // GDrive 的目录封面走文件头内嵌标签（NetworkTagReader），不走 NAS 相对路径。
+        _artworkUrl = source.isGoogleDrive
+            ? null
+            : NetworkMediaService.directoryArtworkUrl(source, entries);
         _loading = false;
       });
       // 反哺自 network.1：进目录后按需读内嵌标签，标题 / 歌手 / 时长 / 封面
@@ -246,8 +269,16 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   }
 
   Song _songOf(RemoteEntry entry) {
+    final source = _active!;
+    if (source.isGoogleDrive) {
+      return NetworkMediaService.driveSong(
+        source: source,
+        entry: entry,
+        album: _albumLabel,
+      );
+    }
     return NetworkMediaService.nasSong(
-      source: _active!,
+      source: source,
       entry: entry,
       album: _albumLabel,
       artworkUrl: _artworkUrl,
@@ -532,24 +563,38 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
           Text('网络音乐源', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
-            'WebDAV / FTP · 按需拉流，不占用电视本地空间',
+            'WebDAV / FTP / Google Drive · 按需拉流，不占用电视本地空间',
             style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
           ),
           const SizedBox(height: 12),
-          SizedBox(
-            width: 220,
-            child: TvActionButton(
-              label: '添加网络源',
-              icon: Icons.add,
-              onPressed: _addSource,
-            ),
+          Row(
+            children: <Widget>[
+              SizedBox(
+                width: 210,
+                child: TvActionButton(
+                  label: '添加网络源',
+                  icon: Icons.add,
+                  onPressed: _addSource,
+                ),
+              ),
+              const SizedBox(width: 10),
+              SizedBox(
+                width: 230,
+                child: TvActionButton(
+                  label: '添加 Google Drive',
+                  valueText: '只读 · 扫码',
+                  icon: Icons.cloud_outlined,
+                  onPressed: _addGoogleDriveSource,
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 12),
           Expanded(
             child: _sources.isEmpty
                 ? Center(
                     child: Text(
-                      '还没有网络源\n按「添加网络源」开始',
+                      '还没有网络源\n按「添加网络源」或「添加 Google Drive」开始',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         fontSize: 12,

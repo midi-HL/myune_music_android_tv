@@ -29,17 +29,22 @@ class NetworkLibraryStore {
 
   List<Song> get favorites => List<Song>.unmodifiable(_favorites);
 
-  /// 只接受网络硬盘媒体（WebDAV / FTP），排除哔哩哔哩与本地文件。
+  /// 只接受网络硬盘媒体（WebDAV / FTP / 只读 Google Drive），
+  /// 排除哔哩哔哩与本地文件。
   static bool isNetworkDrive(Song song) {
     final id = RemoteMediaRegistry.mediaIdOf(song.filePath);
-    if (id != null) return id.startsWith('nas:');
+    if (id != null) return _isDriveId(id);
     final path = song.filePath;
-    return path.startsWith('nas:') ||
+    return _isDriveId(path) ||
         (RemoteMediaRegistry.isNetwork(path) &&
-            RemoteMediaRegistry.decodeTarget(path)?['id']?.toString().startsWith(
-                      'nas:',
-                    ) ==
-                true);
+            _isDriveId(
+              RemoteMediaRegistry.decodeTarget(path)?['id']?.toString(),
+            ));
+  }
+
+  static bool _isDriveId(String? raw) {
+    if (raw == null) return false;
+    return raw.startsWith('nas:') || raw.startsWith('gd:');
   }
 
   Future<void> load() async {

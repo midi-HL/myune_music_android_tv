@@ -38,11 +38,11 @@
 
 ## 0. What's new & feature overview
 
-### 0.1 What's new in v1.2.0
+### 0.1 What's new in v1.3.0
 
 > Semantic versioning: new features bump the minor version, bug-only fixes bump the patch,
 > and each release gets its **own tag / Release** (`v1.0.0` → `v1.1.0` → `v1.1.1` →
-> `v1.1.2` → **`v1.2.0`**). This lets the in-app update check see new builds via
+> `v1.1.2` → `v1.2.0` → **`v1.3.0`**). This lets the in-app update check see new builds via
 > `/releases/latest` and keeps every build individually rollback-able.
 > **Bug fixes are listed in the Release notes** of the matching version.
 
@@ -57,6 +57,7 @@
 | **v1.2.0 now-playing focus fix** | Lyric lines are excluded from D-pad focus (they used to steal initial focus, lose all focus after Left/Right, and let OK trigger an off-screen favorites button); the page now focuses the control bar on open and pulls focus back whenever it lands on an invisible node |
 | **v1.2.0 Bilibili cover art** | The left panel now downloads and shows the video cover automatically (async fetch from the cover URL encoded in the proxy URL when `albumArt` is empty), scaled with square `BoxFit.cover` and capped decode size |
 | **v1.2.0 Bilibili audio quality** | No more fixed 360P + first audio track; requests clarity tiers 127 → 80 → 16 and picks the **highest available** track in `dash.audio[]` by Hi-Res / Dolby / bitrate priority |
+| **v1.3.0 read-only Google Drive** | Fourth network source; LAN QR pairing (zero typing on TV), `drive.readonly` only, local auth helper `tools/gdrive_auth.py`, credentials stored only on the TV; shares browse / playback / favourites / metadata pipeline with WebDAV / FTP |
 
 **2026-11-12: backport from [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
@@ -128,7 +129,7 @@ and the existing phone behaviour (immersive mode, UI scaling, SAF) is unchanged.
 | Original upstream README | [UPSTREAM_README.md](UPSTREAM_README.md) (preserved verbatim) |
 | **This fork's repository** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | This fork's license | **Apache License 2.0** (same as upstream) |
-| This fork's version | `1.2.0` (see `lib/tv/tv_app_info.dart`) |
+| This fork's version | `1.3.0` (see `lib/tv/tv_app_info.dart`) |
 
 The **full upstream commit history is preserved** (no squash, no history rewrite). All port
 work is recorded as additional commits and tags so it can be rolled back at any time. See
@@ -256,7 +257,7 @@ or password is saved.
 
 Per-round fix notes and rollback anchors are in [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md).
 
-## 7. Network media (WebDAV / FTP / Bilibili)
+## 7. Network media (WebDAV / FTP / Google Drive / Bilibili)
 
 Solves the limited local storage of a TV: **stream on demand, never cache to disk**. Remote
 files are read through the local proxy only while playing, so the whole NAS library costs no
@@ -284,6 +285,59 @@ TV storage. The entry is "Network media" in the main rail, with two tabs.
 - **First-byte / URL stability**: WebDAV header timeout is 45 s (below mpv's 60 s) to avoid
   `loading failed` on slow NAS bridges; proxy URLs are no longer broken by path normalisation.
 - Passwords live in local `SharedPreferences` only; never committed, never logged.
+
+### 7.1b Read-only Google Drive (QR pairing)
+
+**Read-only**: only `drive.readonly` is requested. No upload / create / rename /
+delete operations exist, so cloud files are never modified.
+
+Why QR pairing instead of signing in on the TV:
+
+- Android TV / boxes usually have no system browser, so the desktop loopback
+  OAuth flow cannot open the consent page;
+- Google's **device-code flow** (short code on TV) only allows limited scopes
+  (`drive.file` / `drive.appdata`) and **does not support `drive.readonly`**,
+  so an existing music library cannot be read;
+- Google's token endpoint disallows direct browser calls (CORS), OOB callbacks
+  are deprecated, and private IPs cannot be registered as redirect URIs, so a
+  pure web page cannot obtain a long-lived `refresh_token`.
+
+Therefore pairing happens over the **local network**: the TV shows a QR code, a
+phone / PC on the same WiFi opens the pairing page, and credentials are POSTed
+**straight to the TV** — no third-party service, zero typing on the TV. The
+pairing server only listens while the dialog is open, stops immediately on
+close, and uses a one-time pairing code to prevent stray submissions.
+
+One-time setup (about 3 minutes):
+
+1. In [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+   create an OAuth client of type "**Desktop app**"; note `client_id` and
+   `client_secret`.
+2. On the OAuth consent screen enable the Google Drive API, add
+   `https://www.googleapis.com/auth/drive.readonly` as a test scope, and add
+   your own account under "**Test users**" (required for unverified apps).
+3. On the TV open "Network media -> Network drive -> **Add Google Drive**";
+   a QR code, LAN address and a 6-character pairing code are shown.
+4. On a PC run (Python 3 stdlib only, no dependencies):
+
+   ```bash
+   python tools/gdrive_auth.py \
+     --client-id "xxxx.apps.googleusercontent.com" \
+     --client-secret "GOCSPX-xxxx" \
+     --pair-url "http://192.168.1.20:18780/?pair=AB3D7K"
+   ```
+
+   A browser opens the Google login page; after consent the script pushes the
+   `refresh_token` to the TV. `--pair-url` is the QR content (or paste the
+   address shown on screen).
+5. The TV shows "paired + account"; press "Done". Select the source to browse
+   your Drive, with the same playback, queue, starred favourites and embedded
+   tag / cover reading as WebDAV / FTP.
+
+> A `refresh_token` can also be generated manually with
+> [Google OAuth Playground](https://developers.google.com/oauthplayground/)
+> and pasted into the pairing page. Credentials live only in the TV's local
+> `SharedPreferences`, never logged or committed. Google reachability required.
 
 ### 7.2 Bilibili
 
@@ -415,6 +469,7 @@ Full history and anchor tags are preserved:
 | `v1.1.2` | Full D-pad navigation audit, music-only recommendations, Bilibili subtitles / lyrics, redesigned branding |
 | `v1.1.2` (later builds) | Now-playing scale restoration and auto-hiding controls, network-drive backport (embedded tags / favourites), D-pad reachability fixes (assets were replaced via `--clobber`) |
 | **`v1.2.0`** | **Dedicated release tags from now on; fixed now-playing D-pad focus (lyric lines stealing focus / focus loss / stray activation of off-screen favorites), Bilibili video cover auto-display with square scaling, highest available Bilibili audio quality** |
+| **`v1.3.0`** | **New read-only Google Drive source: LAN QR pairing, zero typing on TV, local auth helper; model / proxy / service / TV entry and bilingual docs** |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor

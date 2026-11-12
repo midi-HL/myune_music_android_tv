@@ -7,6 +7,7 @@ import '../../page/playlist/playlist_models.dart';
 import 'bili_library.dart';
 import 'bilibili_client.dart';
 import 'ftp_client.dart';
+import 'google_drive_client.dart';
 import 'local_stream_proxy.dart';
 import 'network_library.dart';
 import 'network_tag_reader.dart';
@@ -44,18 +45,21 @@ class NetworkMediaService {
     String path,
   ) async {
     final target = path.trim().isEmpty ? _rootOf(source) : path;
-    if (source.type == RemoteSourceType.webdav) {
-      return WebDavClient(source).list(target);
-    }
-    return FtpClient(source).list(target);
+    return switch (source.type) {
+      RemoteSourceType.googleDrive => GoogleDriveClient(source).list(target),
+      RemoteSourceType.webdav => WebDavClient(source).list(target),
+      RemoteSourceType.ftp => FtpClient(source).list(target),
+    };
   }
 
   static String rootOf(RemoteSource source) => _rootOf(source);
 
   static String _rootOf(RemoteSource source) {
-    return source.type == RemoteSourceType.webdav
-        ? source.webdavBaseUri.toString()
-        : source.ftpRoot;
+    return switch (source.type) {
+      RemoteSourceType.googleDrive => GoogleDriveClient.rootOf(source),
+      RemoteSourceType.webdav => source.webdavBaseUri.toString(),
+      RemoteSourceType.ftp => source.ftpRoot,
+    };
   }
 
   /// 在当前目录里找常见的专辑封面文件，返回一个可通过本机代理读取的 URL。
@@ -121,6 +125,45 @@ class NetworkMediaService {
   }
 
   /// 把一个网络硬盘音频文件构造成 Song，并登记元数据。
+  /// 把一个 Google Drive 音频文件构造成 Song（只读源）。
+  ///
+  /// 与 nasSong 一样把元数据编码进代理 URL，并合并已读到的内嵌标签，
+  /// 这样收藏 / 播放队列 / 播放页都能直接显示真实标题与封面。
+  static Song driveSong({
+    required RemoteSource source,
+    required RemoteEntry entry,
+    String? album,
+    Uint8List? albumArt,
+  }) {
+    final parsed = splitTitleArtist(entry.name);
+    final title = parsed[0];
+    final artist = parsed[1];
+    final resolvedAlbum =
+        (album == null || album.trim().isEmpty) ? source.name : album.trim();
+    final url = LocalStreamProxy.instance.urlForDrive(
+      source.id,
+      entry.path,
+      title: title,
+      artist: artist,
+      album: resolvedAlbum,
+      mediaId: 'gd:${entry.path}',
+    );
+    final song = Song(
+      title: title,
+      artist: artist,
+      album: resolvedAlbum,
+      filePath: url,
+      albumArt: albumArt,
+    );
+    final enriched = NetworkTagReader.applyToSong(url, song);
+    RemoteMediaRegistry.register(url, enriched);
+    final art = enriched.albumArt;
+    if (art != null && art.isNotEmpty) {
+      RemoteMediaRegistry.registerArtwork(url, art);
+    }
+    return enriched;
+  }
+
   static Song nasSong({
     required RemoteSource source,
     required RemoteEntry entry,

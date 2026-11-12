@@ -7,11 +7,12 @@ import 'package:http/http.dart' as http;
 
 import 'bilibili_client.dart';
 import 'ftp_client.dart';
+import 'google_drive_client.dart';
 import 'remote_source.dart';
 import 'remote_stream.dart';
 import 'webdav_client.dart';
 
-/// 本机流代理：把 WebDAV / FTP / 哔哩哔哩 CDN 统一包装成
+/// 本机流代理：把 WebDAV / FTP / Google Drive / 哔哩哔哩 CDN 统一包装成
 /// `http://127.0.0.1:<port>/starnote/<token>`，交给 mpv 播放。
 ///
 /// 这样 `AudioService.playSong()` 里原有的 `Media(filePath)` 一个字都不用改，
@@ -129,6 +130,31 @@ class LocalStreamProxy {
   }
 
   /// B 站流目标，身份沿用 BiliMusic-Desktop 的 `bilibili:{bvid}:{cid}` 语义。
+  /// Google Drive 只读文件的流目标。
+  /// [fileId] 是 Drive 的 file id；媒体标识用 `gd:<fileId>`，
+  /// 让收藏 / 历史 / 标签缓存有稳定 key（不受代理端口漂移影响）。
+  String urlForDrive(
+    String sourceId,
+    String fileId, {
+    String? title,
+    String? artist,
+    String? album,
+    int? durationSeconds,
+    String? mediaId,
+  }) {
+    return urlFor(<String, dynamic>{
+      'k': 'gd',
+      'proto': 'gdrive',
+      's': sourceId,
+      'p': fileId,
+      'id': mediaId ?? 'gd:$fileId',
+      if (title != null && title.isNotEmpty) 't': title,
+      if (artist != null && artist.isNotEmpty) 'r': artist,
+      if (album != null && album.isNotEmpty) 'l': album,
+      if (durationSeconds != null && durationSeconds > 0) 'd': durationSeconds,
+    });
+  }
+
   String urlForBili(
     String bvid,
     int cid,
@@ -220,7 +246,14 @@ class LocalStreamProxy {
         .trim();
     if (kind.isEmpty && idRaw.startsWith('bilibili:')) kind = 'bili';
     if (kind.isEmpty && idRaw.startsWith('nas:')) kind = 'nas';
+    if (kind.isEmpty && idRaw.startsWith('gd:')) kind = 'gd';
     switch (kind) {
+      case 'gd':
+      case 'gdrive':
+      case 'googledrive':
+      case 'drive':
+        kind = 'gd';
+        break;
       case 'nas':
       case 'webdav':
       case 'dav':
@@ -282,6 +315,8 @@ class LocalStreamProxy {
     final proto = (t['proto'] ?? '').toString().toLowerCase().trim();
     if (kind == 'bili') {
       t['proto'] = 'bilibili';
+    } else if (kind == 'gd') {
+      t['proto'] = 'gdrive';
     } else if (proto == 'ftp' || proto == 'ftps') {
       t['proto'] = 'ftp';
     } else {
@@ -300,7 +335,26 @@ class LocalStreamProxy {
       return (int? start, int? end) =>
           _openBili(target, start: start, end: end);
     }
+    if (kind == 'gd') {
+      return (int? start, int? end) =>
+          _openDrive(target, start: start, end: end);
+    }
     throw StateError('未知的流目标类型：$kind（target=$target）');
+  }
+
+  Future<RemoteStreamResult> _openDrive(
+    Map<String, dynamic> target, {
+    int? start,
+    int? end,
+  }) async {
+    final sourceId = target['s']?.toString() ?? '';
+    final source = RemoteSourceStore.instance.byId(sourceId);
+    if (source == null) {
+      throw StateError('该 Google Drive 源已被删除，请重新添加');
+    }
+    final fileId = target['p']?.toString() ?? '';
+    if (fileId.isEmpty) throw StateError('Google Drive 文件 id 为空');
+    return GoogleDriveClient(source).open(fileId, start: start, end: end);
   }
 
   Future<RemoteStreamResult> _openNas(
