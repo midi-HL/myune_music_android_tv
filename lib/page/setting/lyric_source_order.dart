@@ -22,6 +22,18 @@ class _LyricSourceOrderDialogState extends State<LyricSourceOrderDialog> {
     });
   }
 
+  /// 遥控器 / 手柄 / 键盘用：把某一项上移或下移一格。
+  /// 拖拽手柄只服务鼠标，纯按键设备上无法触发长按拖动，所以这里补两个
+  /// 独立可聚焦、OK 即可触发的按钮，保证全链路十字键可达。
+  void _move(int index, int delta) {
+    final target = index + delta;
+    if (index < 0 || target < 0 || target >= _order.length) return;
+    setState(() {
+      final moved = _order.removeAt(index);
+      _order.insert(target, moved);
+    });
+  }
+
   void _resetToDefault() {
     setState(() {
       _order = List<String>.from(LyricSource.defaultOrderIds);
@@ -36,13 +48,13 @@ class _LyricSourceOrderDialogState extends State<LyricSourceOrderDialog> {
     return AlertDialog(
       title: const Text('歌词来源优先级'),
       content: SizedBox(
-        width: 380,
+        width: 420,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              '拖动调整顺序，越靠上越优先\n',
+              '拖动，或聚焦某一项后按上移 / 下移按钮调整顺序，越靠上越优先\n',
               style: theme.textTheme.bodySmall?.copyWith(fontSize: 14),
             ),
             const SizedBox(height: 12),
@@ -102,6 +114,27 @@ class _LyricSourceOrderDialogState extends State<LyricSourceOrderDialog> {
                               ),
                             ),
                             const SizedBox(width: 8),
+                            // 遥控器：两个独立可聚焦按钮，方向键可达、OK 生效。
+                            IconButton(
+                              tooltip: '上移',
+                              icon: const Icon(Icons.arrow_upward, size: 18),
+                              color: index == 0
+                                  ? colorScheme.onSurfaceVariant
+                                  : colorScheme.primary,
+                              onPressed: index == 0
+                                  ? null
+                                  : () => _move(index, -1),
+                            ),
+                            IconButton(
+                              tooltip: '下移',
+                              icon: const Icon(Icons.arrow_downward, size: 18),
+                              color: index == _order.length - 1
+                                  ? colorScheme.onSurfaceVariant
+                                  : colorScheme.primary,
+                              onPressed: index == _order.length - 1
+                                  ? null
+                                  : () => _move(index, 1),
+                            ),
                             ReorderableDragStartListener(
                               index: index,
                               child: MouseRegion(

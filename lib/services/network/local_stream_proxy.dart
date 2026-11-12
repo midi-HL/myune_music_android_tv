@@ -318,7 +318,14 @@ class LocalStreamProxy {
     // 以配置里的协议为唯一可信来源；URL 中的 proto 字段只作元数据，
     // 避免别名 / 旧数据把 WebDAV 请求错发到 FTP 端口。
     if (source.type == RemoteSourceType.webdav) {
-      return WebDavClient(source).open(path, start: start, end: end);
+      // 自建网盘桥首包可能要几十秒；放宽到 45s（仍小于 mpv 的 60s），
+      // 避免播放器先放弃导致 loading failed。
+      return WebDavClient(source).open(
+        path,
+        start: start,
+        end: end,
+        headerTimeout: const Duration(seconds: 45),
+      );
     }
     return FtpClient(source).open(path, start: start, end: end);
   }
@@ -351,8 +358,9 @@ class LocalStreamProxy {
       request.headers.addAll(BiliClient.instance.cdnHeaders);
       final range = formatRangeHeader(start, end);
       if (range.isNotEmpty) request.headers['Range'] = range;
+      // CDNs / 自建反代首包也可能偏慢，统一放宽到 45 秒（< mpv 60 秒）。
       final response = await client.send(request).timeout(
-            const Duration(seconds: 25),
+            const Duration(seconds: 45),
           );
       if (response.statusCode < 200 || response.statusCode >= 300) {
         await response.stream.drain<void>();

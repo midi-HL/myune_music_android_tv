@@ -1,10 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../tv/tv_focus_nav.dart';
 import '../../page/playlist/playlist_content_notifier.dart';
 import '../../page/playlist/playlist_models.dart';
+import '../../services/network/network_library.dart';
 import '../../services/network/network_media_service.dart';
+import '../../services/network/network_tag_reader.dart';
 import '../../services/network/remote_entry.dart';
 import '../../services/network/remote_source.dart';
 import '../../services/network/remote_stream.dart';
@@ -37,6 +42,10 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   bool _loading = false;
   String? _error;
   bool _enqueueMode = false;
+  bool _readTagsEnabled = true;
+  bool _prefetching = false;
+
+  static const String _readTagsKey = 'starnote.network.readEmbeddedTags';
 
   @override
   bool get wantKeepAlive => true;
@@ -45,6 +54,22 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   void initState() {
     super.initState();
     _sources = RemoteSourceStore.instance.sources;
+    unawaited(_loadTagPreference());
+  }
+
+  Future<void> _loadTagPreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    final enabled = prefs.getBool(_readTagsKey) ?? true;
+    NetworkTagReader.enabled = enabled;
+    if (mounted) setState(() => _readTagsEnabled = enabled);
+  }
+
+  Future<void> _toggleReadTags() async {
+    final next = !_readTagsEnabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_readTagsKey, next);
+    NetworkTagReader.enabled = next;
+    if (mounted) setState(() => _readTagsEnabled = next);
   }
 
   /// 两态切换后把焦点重新落到本页视觉上最靠前的入口控件
@@ -157,6 +182,9 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
         _artworkUrl = NetworkMediaService.directoryArtworkUrl(source, entries);
         _loading = false;
       });
+      // 反哺自 network.1：进目录后按需读内嵌标签，标题 / 歌手 / 时长 / 封面
+      // 就地回填，结果落盘缓存，重启不重读。关闭开关后不产生额外流量。
+      unawaited(_prefetchCurrentDirectory());
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -224,6 +252,117 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       album: _albumLabel,
       artworkUrl: _artworkUrl,
     );
+  }
+
+  /// 列表行标题：读过内嵌标签就用真实「标题 · 歌手」，否则回退文件名。
+  String _displayLabel(RemoteEntry entry, Song? song) {
+    if (entry.isDirectory || song == null) return entry.name;
+    final info = NetworkTagReader.cached(song.filePath);
+    final title = info?.title?.trim();
+    if (title == null || title.isEmpty) return entry.name;
+    final artist = info?.artist?.trim();
+    return (artist != null && artist.isNotEmpty) ? '$title · $artist' : title;
+  }
+
+  /// 列表行右侧信息：内嵌时长优先，否则显示文件大小。
+  String? _displayValue(RemoteEntry entry, Song? song) {
+    if (entry.isDirectory) return '目录';
+    if (song == null) return entry.sizeLabel;
+    final info = NetworkTagReader.cached(song.filePath);
+    final ms = info?.durationMs;
+    if (ms != null && ms > 0) {
+      final total = ms ~/ 1000;
+      final mm = (total ~/ 60).toString().padLeft(2, '0');
+      final ss = (total % 60).toString().padLeft(2, '0');
+      return '$mm:$ss';
+    }
+    return entry.sizeLabel;
+  }
+
+  /// 进目录后按需读取内嵌标签（2 并发、只拉文件头、结果落盘）。
+  /// 读到就刷新列表，标题 / 歌手 / 时长 / 封面会就地回填。
+  Future<void> _prefetchCurrentDirectory({bool manual = false}) async {
+    if (_prefetching || !NetworkTagReader.enabled) return;
+    final urls = _audioEntries.map((e) => _songOf(e).filePath).toList();
+    if (urls.isEmpty) {
+      if (manual && mounted) {
+        await showTvAlert(context, '当前目录没有音频文件');
+      }
+      return;
+    }
+    _prefetching = true;
+    try {
+      final found = await NetworkTagReader.prefetchAll(
+        urls,
+        concurrency: 2,
+        onProgress: (done, total) {
+          // 每读几首刷新一次，避免频繁 rebuild，同时让封面陆续出现。
+          if (mounted && (done % 4 == 0 || done == total)) setState(() {});
+        },
+      );
+      if (mounted) setState(() {});
+      if (manual && mounted) {
+        await showTvAlert(
+          context,
+          found > 0
+              ? '已读取 $found 首的内嵌标签与封面，已缓存到本机'
+              : '没有读到内嵌标签（可能是不支持的格式），仍按文件名显示',
+        );
+      }
+    } finally {
+      _prefetching = false;
+    }
+  }
+
+  /// 默认「收藏」歌单 id：网络硬盘歌曲加进这里，就能在收藏分类直接看到并播放。
+  String? _favoritesPlaylistId() {
+    for (final playlist in context.read<PlaylistContentNotifier>().playlists) {
+      if (playlist.isDefault) return playlist.id;
+    }
+    return null;
+  }
+
+  Future<void> _syncFavoritesToPlaylist(Iterable<Song> songs) async {
+    final id = _favoritesPlaylistId();
+    if (id == null) return;
+    await context.read<PlaylistContentNotifier>().addSongsToPlaylistById(
+      id,
+      songs.map((s) => s.filePath).toList(),
+    );
+  }
+
+  Future<void> _addAllToFavorites() async {
+    final songs = _audioEntries.map(_songOf).toList();
+    if (songs.isEmpty) {
+      await showTvAlert(context, '当前目录没有可收藏的音频文件');
+      return;
+    }
+    final added = await NetworkLibraryStore.instance.addAll(songs);
+    await _syncFavoritesToPlaylist(songs);
+    if (!mounted) return;
+    setState(() {});
+    await showTvAlert(
+      context,
+      added > 0
+          ? '已把 $added 首网络硬盘歌曲加入「收藏」，可在收藏列表直接播放'
+          : '这些歌曲已经在「收藏」里了',
+    );
+  }
+
+  Future<void> _toggleFavorite(RemoteEntry entry) async {
+    final song = _songOf(entry);
+    final added = await NetworkLibraryStore.instance.toggle(song);
+    if (added) {
+      await _syncFavoritesToPlaylist([song]);
+    } else {
+      final id = _favoritesPlaylistId();
+      if (id != null) {
+        await context
+            .read<PlaylistContentNotifier>()
+            .removeSongPathsFromPlaylist(id, [song.filePath]);
+      }
+    }
+    if (mounted) setState(() {});
   }
 
   Future<bool> _ensureProxy() async {
@@ -304,6 +443,24 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
           label: '全部加入队列',
           icon: Icons.playlist_add,
         ),
+        const TvMenuItem<String>(
+          value: 'favoriteAll',
+          label: '全部加入收藏',
+          valueText: '网络硬盘专属',
+          icon: Icons.star_border,
+        ),
+        const TvMenuItem<String>(
+          value: 'readTags',
+          label: '一键读取本目录标签与封面',
+          valueText: '只拉文件头',
+          icon: Icons.image_search,
+        ),
+        TvMenuItem<String>(
+          value: 'tagSwitch',
+          label: '读取内嵌标签',
+          valueText: _readTagsEnabled ? '开' : '关',
+          icon: Icons.tune,
+        ),
         TvMenuItem<String>(
           value: 'click',
           label: '点击行为',
@@ -335,6 +492,15 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
         break;
       case 'queue':
         await _addAllToQueue();
+        break;
+      case 'favoriteAll':
+        await _addAllToFavorites();
+        break;
+      case 'readTags':
+        await _prefetchCurrentDirectory(manual: true);
+        break;
+      case 'tagSwitch':
+        await _toggleReadTags();
         break;
       case 'click':
         setState(() => _enqueueMode = !_enqueueMode);
@@ -541,13 +707,36 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       separatorBuilder: (_, __) => const SizedBox(height: 5),
       itemBuilder: (context, index) {
         final entry = entries[index];
-        return TvActionButton(
-          label: entry.name,
-          value: entry.isDirectory ? '目录' : entry.sizeLabel,
+        final Song? song = entry.isDirectory ? null : _songOf(entry);
+        final favorite =
+            song != null && NetworkLibraryStore.instance.isFavorite(song.filePath);
+        final main = TvActionButton(
+          label: _displayLabel(entry, song),
+          value: _displayValue(entry, song),
           icon: entry.isDirectory
               ? Icons.folder_outlined
               : Icons.audio_file_outlined,
+          selected: favorite,
+          debugLabel: 'net-entry-${entry.path}',
           onPressed: () => _openEntry(entry),
+        );
+        if (song == null) return main;
+        // 星标与主按钮是两个独立可聚焦控件：遥控器按 RIGHT 到星标、OK 收藏，
+        // 不需要长按拖拽或鼠标，符合全链路十字键可达。
+        return Row(
+          children: <Widget>[
+            Expanded(child: main),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 96,
+              child: TvActionButton(
+                label: favorite ? '已收藏' : '收藏',
+                icon: favorite ? Icons.star : Icons.star_border,
+                debugLabel: 'net-fav-${entry.path}',
+                onPressed: () => _toggleFavorite(entry),
+              ),
+            ),
+          ],
         );
       },
     );

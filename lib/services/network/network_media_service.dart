@@ -8,6 +8,8 @@ import 'bili_library.dart';
 import 'bilibili_client.dart';
 import 'ftp_client.dart';
 import 'local_stream_proxy.dart';
+import 'network_library.dart';
+import 'network_tag_reader.dart';
 import 'remote_entry.dart';
 import 'remote_media_registry.dart';
 import 'remote_source.dart';
@@ -25,6 +27,11 @@ class NetworkMediaService {
     await RemoteSourceStore.instance.load();
     await BiliAuthStore.instance.load();
     await BiliLibraryStore.instance.load();
+    // 网络硬盘「收藏」与内嵌标签缓存：两者都是纯本地 IO，不联网。
+    // 顺序不能反 —— 收藏里的 Song 要先注册进 RemoteMediaRegistry，歌单加载
+    // 时 _parseSongMetadata() 才能零网络拿到标题 / 封面 / 时长等元信息。
+    await NetworkLibraryStore.instance.load();
+    await NetworkTagReader.initialize();
     try {
       await LocalStreamProxy.instance.start();
     } catch (_) {
@@ -150,11 +157,15 @@ class NetworkMediaService {
           ? Duration(seconds: durationSeconds)
           : null,
     );
-    RemoteMediaRegistry.register(url, song);
-    if (albumArt != null && albumArt.isNotEmpty) {
-      RemoteMediaRegistry.registerArtwork(url, albumArt);
+    // 已读到的内嵌标签（标题 / 歌手 / 专辑 / 封面 / 时长）优先于文件名拆分，
+    // 让网络硬盘歌曲在网络媒体页、收藏列表、播放页都能显示真实元信息。
+    final enriched = NetworkTagReader.applyToSong(url, song);
+    RemoteMediaRegistry.register(url, enriched);
+    final art = enriched.albumArt;
+    if (art != null && art.isNotEmpty) {
+      RemoteMediaRegistry.registerArtwork(url, art);
     }
-    return song;
+    return enriched;
   }
 
   /// 把一个 B 站分 P 构造成 Song，并登记元数据（含封面 URL）。

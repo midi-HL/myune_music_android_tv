@@ -13,6 +13,7 @@ import '../services/notification_service.dart';
 import '../services/android_content_resolver.dart';
 import '../services/network/bilibili_client.dart';
 import '../services/network/network_media_service.dart';
+import '../services/network/network_tag_reader.dart';
 import '../services/network/remote_media_registry.dart';
 
 import 'decryptor/krc_decryptor.dart';
@@ -434,7 +435,8 @@ class LyricsHandler {
   /// 网络媒体的歌词链路（按优先级）：
   ///   1. B 站官方 CC 字幕：视频自带字幕时直接在歌词区域按时间轴呈现；
   ///   2. 网盘音频同目录的同名外置字幕 / LRC（.lrc/.srt/.ass/.ssa/.vtt）；
-  ///   3. 在线歌词（用户启用时）作为最后的兜底。
+  ///   3. 音频文件内嵌歌词（NetworkTagReader 读文件头得到，纯本地、不联网）；
+  ///   4. 在线歌词（用户启用时）作为最后的兜底。
   /// 全程异步、不阻塞播放；每一步都校验当前歌曲未被切走。
   Future<void> _loadNetworkLyricsPipeline(Song song, String path) async {
     bool stillCurrent() => _getCurrentSong()?.filePath == path;
@@ -489,7 +491,24 @@ class LyricsHandler {
       // 网盘没有同名文件时静默跳过。
     }
 
-    // 3) 在线歌词兜底
+    // 3) 音频内嵌歌词（反哺自 network.1）：读取标签时已顺带拿到，
+    //    纯本地、不产生额外流量；解析不成 LRC / SRT 就继续走在线兜底。
+    final embedded = NetworkTagReader.embeddedLyrics(path);
+    if (embedded != null && embedded.isNotEmpty) {
+      try {
+        final lines = _parseNetworkSidecar(utf8.encode(embedded));
+        if (!stillCurrent()) return;
+        if (lines.isNotEmpty) {
+          _currentLyrics = lines;
+          _notifyListeners();
+          return;
+        }
+      } catch (_) {
+        // 内嵌歌词格式不支持时静默跳过。
+      }
+    }
+
+    // 4) 在线歌词兜底
     if (!_settingsProvider.enableOnlineLyrics) return;
     try {
       await _loadOnlineLyricsPipeline(

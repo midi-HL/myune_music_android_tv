@@ -18,6 +18,7 @@
 
 ## Contents
 
+0. [What's new & feature overview](#0-whats-new--feature-overview)
 1. [What this is](#1-what-this-is)
 2. [Upstream source repository](#2-upstream-source-repository)
 3. [Parity with upstream](#3-parity-with-upstream)
@@ -34,6 +35,65 @@
 14. [Credits](#14-credits)
 
 ---
+
+## 0. What's new & feature overview
+
+### 0.1 What's new in v1.1.2
+
+> The version tag stays `v1.1.2`; each update replaces the Release assets with
+> `--clobber` instead of creating a new tag. **Bug fixes are listed in the Release notes.**
+
+| Area | Changes |
+| --- | --- |
+| D-pad | Full geometric focus-navigation audit; offscreen-page focus isolation, same-row/column priority, visibility filtering; progress bar never swallows arrow keys, settings sliders adjust with Left/Right and can be left with Up/Down |
+| Now-playing page | Restored desktop layout scale (fixed the too-small UI and thin control bar); smooth area-based scaling at any resolution; controls auto-hide after 5 s of inactivity and wake on any arrow / OK / media key |
+| Music & lyrics | Bilibili recommendations limited to the music category; subtitle / lyric auto-detection; lyric-source priority dialog gained Up/Down buttons so a remote can reorder sources |
+| Artwork | Only the 320x180 TV banner was redrawn; the square / round phone launcher icons are untouched |
+| Network drives (this backport) | See "2026-11-12 backport" below |
+| Gamepad / remote | Every new screen, menu, star button, toggle and dialog is fully D-pad reachable with a visible focus highlight; soft keyboard and Back behaviour unchanged |
+
+**2026-11-12: backport from [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
+
+That branch is based on upstream v0.9.5 and fixes/optimises the network-drive (WebDAV / FTP)
+pipeline. The parts that make sense on Android TV were ported back (desktop-only Google Drive
+OAuth and its file-management UI were **not** ported):
+
+- **Embedded tags / cover / lyrics**: fetch only the file header via HTTP `Range`, parse FLAC
+  `METADATA_BLOCK` and MP3 `ID3v2` in pure Dart for title / artist / album / duration /
+  cover / embedded lyrics. Results use a memory -> disk -> network cache; metadata JSON and
+  cover binaries are stored separately and hydrated on startup, so a restart never re-reads.
+- **Network-drive songs in Favourites**: WebDAV / FTP songs can be starred individually or
+  added with "Add all to favourites", then appear directly in the built-in **Favourites**
+  playlist with real title, artist, duration and cover; play with one click, **no more drilling
+  into "Network media -> Network drive" every time**. **Bilibili is excluded** — it keeps its
+  own favourites / history store.
+- **Stability**: network proxy URLs are no longer mangled by `path.normalize()` (which broke
+  the cover worker); WebDAV first-byte timeout raised to 45 s (below mpv's 60 s) so slow
+  NAS bridges no longer cause `loading failed`.
+- **Remote usability**: all new actions live in the existing TV "More" menu; the per-song star
+  is a separate focusable button. Everything is reachable with the D-pad.
+
+### 0.2 Features added compared with upstream
+
+Baseline: [xiaobaimc/myune_music v0.9.5](https://github.com/xiaobaimc/myune_music), a
+Windows / Linux desktop local player (Flutter + Rust / mpv). This port keeps its playback and
+UI capabilities and adds:
+
+| Capability | Upstream desktop | StarNote (this port) |
+| --- | --- | --- |
+| Platform | Windows / Linux desktop | **Android / Android TV / plain Android TV boxes**, one APK auto-adapts |
+| Input | Mouse / keyboard | **Remote / D-pad / keyboard / gamepad only** operation, geometric focus navigation + native-style highlight |
+| File access | Local disk paths | Added **Android SAF** (`ACTION_OPEN_DOCUMENT_TREE`, `content://` -> `fd://`) and in-app UI scaling without changing system DPI |
+| Scaling | Fixed desktop layout | Area-based smooth scaling at any resolution; now-playing page matches desktop visual size |
+| Immersive playback | Controls auto-hide on mouse idle | Same behaviour, plus **wake-up from remote / gamepad keys** |
+| TV entry point | None | Leanback launcher, TV banner, gamepad icons, media keys, Back / drawer logic |
+| Network drives | None | **WebDAV / FTP** clients + local stream proxy (HTTP Range / resume), stream on demand |
+| Network audio metadata | None | Embedded tag / cover / lyric reading with on-disk cache (backported from network.1) |
+| Network audio favourites | None | Network-drive songs go straight into Favourites with metadata preview and one-click play (Bilibili excluded) |
+| Bilibili | None | Login-free search / playback, music-category recommendations, QR login, multi-part, favourites / history, official CC subtitles |
+| Audio formats | Common formats | Extra legacy formats (APE / WavPack / TTA / TAK / DSD / AIFF / CAF / WMA / MIDI / AC3 / DTS …), video containers playable as audio-only |
+| Delivery & licensing | Source only | Apache-2.0, bilingual README / NOTICE / third-party notices, **fixed release signing**, GitHub Actions 3-ABI builds (arm64-v8a / armeabi-v7a / x86_64) |
+| App info | Points upstream | About / update check point to this repository; full Git history preserved for rollback |
 
 ## 1. What this is
 
@@ -204,6 +264,19 @@ TV storage. The entry is "Network media" in the main rail, with two tabs.
   "Up / Refresh / Play all audio / Add all to queue" plus a "Play now / Enqueue" tap-mode
   toggle are available.
 - Recognises `mp3 / flac / wav / m4a / aac / ogg / opus / wma / ape / aiff / dsf / m4b…`.
+- **Favourites (Bilibili excluded)**: each audio row has its own focusable star button, and
+  "More -> Add all to favourites" adds a whole directory. Favourited songs appear directly in
+  the built-in **Favourites** playlist with one-click playback — no more drilling into the
+  network-drive folders. Full song objects (title / artist / album / duration / cover) are
+  persisted, so metadata survives a restart.
+- **Embedded metadata preview**: FLAC / ID3v2 tags are read from the file header on demand;
+  the list shows the real "title · artist" and duration, and the cover is backfilled into the
+  now-playing page and Favourites. "More -> Read tags & covers in this folder" prefetches a
+  whole directory; the "Read embedded tags" toggle disables the extra traffic. Only metadata
+  and covers are cached — **audio files are never cached** — and the cache is hydrated on
+  startup. Embedded lyrics are used as one of the lyric sources.
+- **First-byte / URL stability**: WebDAV header timeout is 45 s (below mpv's 60 s) to avoid
+  `loading failed` on slow NAS bridges; proxy URLs are no longer broken by path normalisation.
 - Passwords live in local `SharedPreferences` only; never committed, never logged.
 
 ### 7.2 Bilibili

@@ -457,6 +457,14 @@ class PlaylistContentNotifier extends ChangeNotifier {
   String _normalizePath(String path) {
     // content:// URI 是稳定 ID，不能交给 path 包规范化。
     if (AndroidContentResolver.isContentUri(path)) return path;
+    // 网络媒体的 filePath 是本机流代理 URL 或 `nas:` 裸标识，不是本地路径。
+    // path.normalize 会折叠 `http://` 里的连续斜杠、破坏 URL；破坏后封面
+    // 工作线程无法再识别它是网络媒体，会误走本地文件读取而永远拿不到封面。
+    // 与 Song 的缓存 key 语义保持一致：网络地址本身就是唯一标识，原样返回。
+    // （反哺自 XYkadicloud/myune_music v0.9.5-network.1 的同名修复）
+    if (RemoteMediaRegistry.isNetwork(path) || path.contains('://')) {
+      return path;
+    }
     return p.normalize(path);
   }
 
@@ -4372,6 +4380,29 @@ class PlaylistContentNotifier extends ChangeNotifier {
     notifyListeners();
 
     return newPaths.length;
+  }
+
+  /// 从指定歌单移除若干路径（用于网络硬盘「取消收藏」时的同步）。
+  /// 与 removeSongFromAllPlaylists 不同：不停止播放、不弹通知、不影响其它歌单。
+  Future<void> removeSongPathsFromPlaylist(
+    String playlistId,
+    List<String> paths,
+  ) async {
+    final index = _playlists.indexWhere((p) => p.id == playlistId);
+    if (index < 0 || paths.isEmpty) return;
+    final target = _playlists[index];
+    final wanted = paths.map(_normalizePath).toSet();
+    final before = target.songFilePaths.length;
+    target.songFilePaths
+        .removeWhere((path) => wanted.contains(_normalizePath(path)));
+    if (target.songFilePaths.length == before) return;
+    target.songs?.removeWhere(
+      (song) => wanted.contains(_normalizePath(song.filePath)),
+    );
+    await _savePlaylists();
+    if (_selectedIndex == index) await _loadCurrentPlaylistSongs();
+    await _updateAllSongsList();
+    notifyListeners();
   }
 
   /// 批量为多个歌单添加歌曲，仅执行一次保存和更新
