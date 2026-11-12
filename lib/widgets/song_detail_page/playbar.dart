@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:provider/provider.dart';
@@ -9,6 +8,7 @@ import '../balance_rate_control.dart';
 import '../play_pause_button.dart';
 import '../play_mode_button.dart';
 import '../../tv/tv_focus_nav.dart';
+import '../ui_scale_scope.dart';
 
 // 格式化时间函数
 String _formatDuration(Duration duration) {
@@ -71,12 +71,9 @@ class _PlaybarState extends State<Playbar> {
     final Color onBarColor = colorScheme.onSurface;
     final Color accentColor = colorScheme.primary;
 
-    final size = MediaQuery.of(context).size;
-    final double width = size.width > 0 ? size.width : 1150.0;
-    final double height = size.height > 0 ? size.height : 620.0;
-    final double scale = (math.sqrt(
-      (width * height) / (1150.0 * 620.0),
-    )).clamp(0.5, 2.0);
+    // 与播放页共用同一缩放系数：按窗口面积平滑缩放 + 反向补偿 Android/TV
+    // 全局 UI 缩放，保证控件栏的字号 / 进度条 / 图标与桌面端比例一致。
+    final double scale = playPageScale(context);
 
     // 顶级 Consumer，确保 Playbar 整体能响应 PlaylistContentNotifier 的变化
     return Consumer<PlaylistContentNotifier>(
@@ -339,12 +336,9 @@ class _PortraitPlaybarState extends State<PortraitPlaybar> {
     final Color onBarColor = colorScheme.onSurface;
     final Color accentColor = colorScheme.primary;
 
-    final size = MediaQuery.of(context).size;
-    final double width = size.width > 0 ? size.width : 1150.0;
-    final double height = size.height > 0 ? size.height : 620.0;
-    final double scale = (math.sqrt(
-      (width * height) / (1150.0 * 620.0),
-    )).clamp(0.5, 2.0);
+    // 与播放页共用同一缩放系数：按窗口面积平滑缩放 + 反向补偿 Android/TV
+    // 全局 UI 缩放，保证控件栏的字号 / 进度条 / 图标与桌面端比例一致。
+    final double scale = playPageScale(context);
 
     // 顶级 Consumer，确保 Playbar 整体能响应 PlaylistContentNotifier 的变化
     return Consumer<PlaylistContentNotifier>(

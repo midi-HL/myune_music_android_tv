@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:mesh_gradient/mesh_gradient.dart';
 import 'package:colorgram/colorgram.dart';
@@ -16,8 +17,8 @@ import '../widgets/song_detail_page/app_window_title_bar.dart';
 import './setting/settings_provider.dart';
 import '../widgets/playing_queue_drawer.dart';
 import '../widgets/lyrics_settings_drawer.dart';
-import '../tv/tv_device.dart';
 import '../tv/tv_focus_nav.dart';
+import '../widgets/ui_scale_scope.dart';
 import 'playlist/playlist_models.dart';
 
 // 公共模糊背景组件
@@ -311,6 +312,25 @@ class _SongDetailPageState extends State<SongDetailPage> {
   bool _isHidden = false;
   Timer? _hideTimer;
   bool _lastSettingValue = false;
+  bool _autoHideEnabled = false;
+
+  // 缓存 tear-off，保证 add/remove 用的是同一个回调对象。
+  late final bool Function(KeyEvent) _keyHandler = _onHardwareKey;
+
+  @override
+  void initState() {
+    super.initState();
+    // 原版只靠 Listener/MouseRegion 监听鼠标移动来唤醒隐藏的控件栏。电视
+    // 盒子 / 遥控器 / 纯键盘没有 pointer move，隐藏后就再也唤不回来。这里
+    // 只「观察」硬件按键（返回 false 不拦截），让任何方向键 / 确认键 / 媒体键
+    // 都能先恢复控件栏，且不影响 TvInputScope 的几何导航与Flutter默认按键处理。
+    HardwareKeyboard.instance.addHandler(_keyHandler);
+  }
+
+  bool _onHardwareKey(KeyEvent event) {
+    if (event is KeyDownEvent) _handleUserInteraction(_autoHideEnabled);
+    return false;
+  }
 
   void _startTimer() {
     _cancelTimer();
@@ -341,6 +361,7 @@ class _SongDetailPageState extends State<SongDetailPage> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_keyHandler);
     _cancelTimer();
     super.dispose();
   }
@@ -348,10 +369,12 @@ class _SongDetailPageState extends State<SongDetailPage> {
   @override
   Widget build(BuildContext context) {
     final settings = context.watch<SettingsProvider>();
-    // TV 上禁用「鼠标静止后隐藏控件」：否则 IgnorePointer 会让遥控器
-    // 永远无法触达播放页按钮。
-    final autoHideEnabled =
-        settings.autoHidePlayPageComponents && !TvDevice.isTv;
+    // 恢复上游原版行为：所有平台一致，播放页无操作 5 秒后隐藏标题栏与
+    // 播放控件栏，仅保留封面与歌词，提升视听体验。
+    // 移植时一度加过 `&& !TvDevice.isTv` 门控把它关掉；现在遥控器 / 键盘
+    // 已能通过 HardwareKeyboard 监听随时唤醒，隐藏不再导致控件不可达。
+    final autoHideEnabled = settings.autoHidePlayPageComponents;
+    _autoHideEnabled = autoHideEnabled;
 
     // 监听设置变化
     if (autoHideEnabled != _lastSettingValue) {
@@ -375,12 +398,11 @@ class _SongDetailPageState extends State<SongDetailPage> {
     final aspectRatio = size.aspectRatio;
     final isPortrait = aspectRatio <= 1.0; // 竖屏判断
 
-    // 计算窗口分辨率缩放系数
-    final double width = size.width > 0 ? size.width : 1150.0;
-    final double height = size.height > 0 ? size.height : 620.0;
-    final double scale = (math.sqrt(
-      (width * height) / (1150.0 * 620.0),
-    )).clamp(0.5, 2.0);
+    // 计算窗口分辨率缩放系数：与桌面端同基准（1150x620）按面积平滑缩放，
+    // 并反向补偿 Android/TV 全局 UI 缩放对固定尺寸的二次缩小。这样在任意
+    // 分辨率、任意「界面缩放」设置下，封面 / 标题 / 歌词 / 控件栏的视觉大小
+    // 都与桌面端一致，不会再出现整体偏小、控件栏过细的问题。
+    final double scale = playPageScale(context);
 
     return Listener(
       onPointerDown: (_) => _handleUserInteraction(autoHideEnabled),

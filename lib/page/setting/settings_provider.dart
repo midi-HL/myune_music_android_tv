@@ -100,7 +100,10 @@ class SettingsProvider with ChangeNotifier {
   bool _enableLoudness = false;
   bool _enableReplayGain = false;
   bool _enableGaplessPlayback = false; // 默认不启用无缝播放
-  bool _autoHidePlayPageComponents = false; // 默认不自动隐藏部分组件
+  // 播放页「无操作自动隐藏控件栏」：Android / 电视盒子默认开启（还原桌面
+  // 原版在播放时隐藏控件栏、提升视听体验的行为），桌面端沿用原默认值 false。
+  // 用户仍可在「播放页」设置里随时关闭。
+  bool _autoHidePlayPageComponents = Platform.isAndroid;
   bool _autoCheckUpdates = true; // 默认启用启动时自动检查更新
   double _androidUiScale = 0.72; // Android 默认按桌面布局缩小到 72%
 
@@ -266,7 +269,7 @@ class SettingsProvider with ChangeNotifier {
     _enableReplayGain = prefs.getBool(_enableReplayGainKey) ?? false;
     _enableGaplessPlayback = prefs.getBool(_enableGaplessPlaybackKey) ?? false;
     _autoHidePlayPageComponents =
-        prefs.getBool(_autoHidePlayPageComponentsKey) ?? false;
+        prefs.getBool(_autoHidePlayPageComponentsKey) ?? Platform.isAndroid;
     _autoCheckUpdates =
         prefs.getBool(_autoCheckUpdatesKey) ?? true; // 加载自动检查更新设置
 

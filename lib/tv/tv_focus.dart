@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/ui_scale_scope.dart';
+
 // TV 分支专用缩放：默认 1.0（不缩放），范围 0.8~1.3。
 // 与手机端的 0.72 缩放完全隔离，互不影响。
 //
@@ -29,14 +31,17 @@ class TvUiScaler extends StatelessWidget {
               maxWidth: virtualWidth,
               minHeight: virtualHeight,
               maxHeight: virtualHeight,
-              child: Transform.scale(
-                scale: effective,
-                alignment: Alignment.topLeft,
-                transformHitTests: true,
-                child: SizedBox(
-                  width: virtualWidth,
-                  height: virtualHeight,
-                  child: child,
+              child: UiScaleScope(
+                visualScale: effective,
+                child: Transform.scale(
+                  scale: effective,
+                  alignment: Alignment.topLeft,
+                  transformHitTests: true,
+                  child: SizedBox(
+                    width: virtualWidth,
+                    height: virtualHeight,
+                    child: child,
+                  ),
                 ),
               ),
             ),

@@ -254,6 +254,7 @@ class TvFocusController {
     TraversalDirection direction,
     FocusNode current, {
     bool relaxed = false,
+    FocusNode? exclude,
   }) {
     final currentRect = rectOf(current);
     if (currentRect == null) return false;
@@ -281,7 +282,7 @@ class TvFocusController {
     double bestScore = double.infinity;
 
     for (final candidate in candidates) {
-      if (candidate.node == current) continue;
+      if (candidate.node == current || candidate.node == exclude) continue;
       final layer = _modalLayerOf(candidate.node);
       if (activeLayer != null) {
         if (layer != activeLayer) continue;
@@ -781,11 +782,19 @@ class _TvAdjustableSliderState extends State<TvAdjustableSlider> {
       return true;
     }
     // 非调值方向：按几何把焦点移到相邻控件（严格 + 放宽兜底）。
-    if (!TvFocusController.instance.moveFocus(direction, current)) {
+    // 必须排除滑块自身的 FocusNode：moveFocus 里「横向长条可达性」特判会把
+    // 副轴偏移置 0，若语义焦点是包着滑块的整行容器，滑块节点就会成为最近的
+    // 「正上/正下」候选，导致按 UP/DOWN 又落回滑块（实测 UP 离开失败）。
+    if (!TvFocusController.instance.moveFocus(
+      direction,
+      current,
+      exclude: _node,
+    )) {
       TvFocusController.instance.moveFocus(
         direction,
         current,
         relaxed: true,
+        exclude: _node,
       );
     }
     return true;

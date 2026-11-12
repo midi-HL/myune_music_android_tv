@@ -44,6 +44,7 @@ import 'tv/tv_focus_nav.dart';
 import 'tv/tv_input_scope.dart';
 import 'tv/tv_navigation.dart';
 import 'tv/tv_settings.dart';
+import 'widgets/ui_scale_scope.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -224,14 +225,17 @@ class _AndroidUiScaler extends StatelessWidget {
               maxWidth: virtualWidth,
               minHeight: virtualHeight,
               maxHeight: virtualHeight,
-              child: Transform.scale(
-                scale: effectiveScale,
-                alignment: Alignment.topLeft,
-                transformHitTests: true,
-                child: SizedBox(
-                  width: virtualWidth,
-                  height: virtualHeight,
-                  child: child,
+              child: UiScaleScope(
+                visualScale: effectiveScale,
+                child: Transform.scale(
+                  scale: effectiveScale,
+                  alignment: Alignment.topLeft,
+                  transformHitTests: true,
+                  child: SizedBox(
+                    width: virtualWidth,
+                    height: virtualHeight,
+                    child: child,
+                  ),
                 ),
               ),
             ),
