@@ -38,11 +38,11 @@
 
 ## 0. What's new & feature overview
 
-### 0.1 What's new in v1.5.0
+### 0.1 What's new in v1.5.1
 
 > Semantic versioning: new features bump the minor version, bug-only fixes bump the patch,
 > and each release gets its **own tag / Release** (`v1.0.0` → `v1.1.0` → `v1.1.1` →
-> `v1.1.2` → `v1.2.0` → `v1.3.0` → `v1.4.0` → **`v1.5.0`**). This lets the in-app update check see new builds via
+> `v1.1.2` → `v1.2.0` → `v1.3.0` → `v1.4.0` → `v1.5.0` → **`v1.5.1`**). This lets the in-app update check see new builds via
 > `/releases/latest` and keeps every build individually rollback-able.
 > **Bug fixes are listed in the Release notes** of the matching version.
 
@@ -64,6 +64,8 @@
 | **v1.5.0 title fix (primary)** | Song title / artist no longer scale with the cover; pinned to desktop 20 / 14 visual pixels. Large-screen inflation capped at 1.0; Android default lyric settings unified to 30.0 / 550 / 6.0 / 4.0. |
 | **v1.5.0 performance constraint** | Kept v1.4.0 one-shot static blur and visual quality; **added no real-time / per-frame gaussian blur**. The previous build was confirmed smooth except for a brief hitch when opening. |
 | **v1.5.0 Drive pairing helper** | New `gdrive-pair/` (Go + Fyne, Kazumi-inspired Material 3 dark / rounded cards / side nav + top bar): auto-redirect to Settings when Google info is missing, persistent local config, direct authorization-code entry, TV pairing via the existing protocol; phone pairing page restyled to match. |
+| **v1.5.1 real font fix** | An A/B pixel comparison showed v1.5.0's value was identical to the old clamp lower bound (zero visual change); now explicitly 15 / 10.5 visual pixels with no clamp, plus anti-regression assertions. |
+| **v1.5.1 Windows helper** | Added `gdrive-pair-windows-amd64.exe` alongside Linux amd64 / arm64; no phone native app (rationale in `gdrive-pair/README.md`). |
 
 **2026-11-12: backport from [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
@@ -135,7 +137,7 @@ and the existing phone behaviour (immersive mode, UI scaling, SAF) is unchanged.
 | Original upstream README | [UPSTREAM_README.md](UPSTREAM_README.md) (preserved verbatim) |
 | **This fork's repository** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | This fork's license | **Apache License 2.0** (same as upstream) |
-| This fork's version | `1.5.0` (see `lib/tv/tv_app_info.dart`) |
+| This fork's version | `1.5.1` (see `lib/tv/tv_app_info.dart`) |
 
 The **full upstream commit history is preserved** (no squash, no history rewrite). All port
 work is recorded as additional commits and tags so it can be rolled back at any time. See
@@ -502,6 +504,7 @@ Full history and anchor tags are preserved:
 | **`v1.3.0`** | **New read-only Google Drive source: LAN QR pairing, zero typing on TV, local auth helper; model / proxy / service / TV entry and bilingual docs** |
 | **`v1.4.0`** | **Now-playing visual normalization, real-time lyric selection inside Lyrics Settings, Google Drive testing-status limits and re-auth guidance** |
 | **`v1.5.0`** | **Fixed oversized song/artist title and large-screen inflation; kept one-shot static blur with no new real-time blur; added a Go/Fyne Google Drive pairing helper and restyled phone pairing page** |
+| **`v1.5.1`** | **Actually fixed song/artist title size (A/B verified), added Windows helper, confirmed QR pairing page as the mobile fallback** |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor

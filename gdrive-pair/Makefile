@@ -2,7 +2,7 @@ GO ?= go
 BIN := bin/gdrive-pair
 CMD := ./cmd/gdrive-pair
 
-.PHONY: all test fmt vet tidy build clean cross-amd64 cross-arm64
+.PHONY: all test fmt vet tidy build clean cross-amd64 cross-arm64 cross-windows
 
 all: test build
 
@@ -29,6 +29,10 @@ cross-amd64: tidy
 cross-arm64: tidy
 	go install github.com/fyne-io/fyne-cross@latest
 	fyne-cross linux -arch=arm64 -app-id=com.midihl.gdrivepair $(CMD)
+
+cross-windows: tidy
+	go install github.com/fyne-io/fyne-cross@latest
+	fyne-cross windows -arch=amd64 -app-id=com.midihl.gdrivepair $(CMD)
 
 clean:
 	rm -rf bin fyne-cross

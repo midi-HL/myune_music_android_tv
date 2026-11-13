@@ -52,18 +52,33 @@ make build                # 本机平台
 
 产物：`bin/gdrive-pair`（Windows 为 `gdrive-pair.exe`）。
 
-### 交叉编译 Linux x86_64 / ARM64
+### 交叉编译 Linux x86_64 / ARM64 / Windows amd64
 
-Fyne 推荐用官方 `fyne-cross`（Docker，内置交叉工具链）：
+Fyne 推荐用官方 `fyne-cross`（Docker，内置交叉工具链与 mingw，宿主无需 CGO）：
 
 ```bash
 go install github.com/fyne-io/fyne-cross@latest
 make cross-amd64          # -> fyne-cross/bin/linux-amd64/
 make cross-arm64          # -> fyne-cross/bin/linux-arm64/
+make cross-windows        # -> fyne-cross/bin/windows-amd64/*.exe
 ```
 
 CI（`.github/workflows/gdrive-pair.yml`）会在 push 时自动跑单元测试并产出
-Linux amd64 / arm64 两个架构的可执行文件。
+**Linux amd64 / Linux arm64 / Windows amd64** 三个可执行文件；发布版会作为
+Release 附件提供，均为单文件绿色程序，无需安装。
+
+## 为什么不做手机原生 App
+
+手机端**沿用电视二维码打开的自包含配页**（已与电脑端同步为 Kazumi 风格），
+不额外提供 Android/iOS 原生包，理由：
+
+1. Google OAuth 客户端的创建（Cloud Console、同意屏幕加 `drive.readonly`、
+   测试用户、桌面应用凭据）本身就是桌面浏览器流程，手机上操作极其繁琐；
+2. 用户既然已在电脑上完成申请，顺势在同一台电脑完成授权与配对是自然延伸，
+   无需再切到手机；
+3. 手机侧保留扫码配页，已覆盖「身边只有手机」的兜底场景，不是功能空白；
+4. 再维护一套 Fyne 移动端包需要 Android SDK/NDK、签名与侧载分发，收益远低于
+   成本，也会让「轻量」这一前提失效。
 
 ## 目录结构
 

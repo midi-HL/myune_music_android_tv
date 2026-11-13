@@ -701,18 +701,21 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                               );
 
                                               // 歌曲名 / 作曲家：这是最重要的视觉对齐项。
-                                              // 桌面端 1150x620 基准下 imageSize=310，
-                                              // (310*0.05).clamp(20,32)=20、(310*0.03).clamp(14,28)=14，
-                                              // 实际都落在 clamp 下限 20 / 14。
-                                              // 电视端不再用 imageSize 联动（1080p 上封面被放大后
-                                              // 会把字号顶到 26~32，正是「名字太大」的根因），
-                                              // 改为固定桌面基准 20 / 14「视觉像素」，再按
-                                              // 1/visualScale 转成逻辑像素，视觉恒定与电脑端一致。
-                                              // 桌面端 visualScale=1.0，等价于上游原版。
+                                              //
+                                              // 历史问题：原实现 (imageSize*0.05).clamp(20/visual,
+                                              // 32/visual) 在电视分辨率下恒命中下限 20/visual；
+                                              // v1.5.0 误把「锁到桌面基准 20/visual」当成修复，
+                                              // 数值与该下限完全相同，A/B 截图证明像素零变化。
+                                              //
+                                              // 真正原因：电视把 720p 画面放大到 1080p 面板，
+                                              // 同样的逻辑字号在物理上被放大，观感明显大于电脑窗口。
+                                              // 因此这里显式降到 15 / 10.5「视觉像素」，且不再经过
+                                              // 任何 clamp（避免又被下限吃掉），按 1/visualScale
+                                              // 转成逻辑像素。桌面端 visualScale=1.0。
                                               final double titleFontSize =
-                                                  20.0 / visual;
+                                                  15.0 / visual;
                                               final double artistFontSize =
-                                                  14.0 / visual;
+                                                  10.5 / visual;
 
                                               final borderRadius =
                                                   BorderRadius.circular(12);

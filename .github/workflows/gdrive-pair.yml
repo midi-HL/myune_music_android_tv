@@ -68,3 +68,30 @@ jobs:
           name: gdrive-pair-linux-${{ matrix.arch }}
           path: gdrive-pair/fyne-cross/bin/linux-${{ matrix.arch }}/
           if-no-files-found: error
+
+  build-windows:
+    name: Windows amd64
+    needs: test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gdrive-pair
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Install fyne-cross
+        run: go install github.com/fyne-io/fyne-cross@latest
+      - name: Cross-compile Windows exe (Docker toolchain + mingw, no host CGO)
+        run: |
+          go mod tidy
+          fyne-cross windows -arch=amd64 \
+            -app-id=com.midihl.gdrivepair ./cmd/gdrive-pair
+      - name: List artifacts
+        run: find fyne-cross/bin -type f -maxdepth 3 -printf '%p %s bytes\n'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdrive-pair-windows-amd64
+          path: gdrive-pair/fyne-cross/bin/windows-amd64/
+          if-no-files-found: error
