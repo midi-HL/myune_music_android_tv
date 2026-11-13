@@ -63,11 +63,16 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
 
     // 严格几何方向优先；若该方向上确实没有同行 / 同列候选，再放宽对齐
     // 约束重试一次（方向仍然严格不变），避免焦点卡在死角里按不动。
-    if (!TvFocusController.instance.moveFocus(intent.direction, node)) {
+    if (!TvFocusController.instance.moveFocus(
+      intent.direction,
+      node,
+      lockZone: true,
+    )) {
       TvFocusController.instance.moveFocus(
         intent.direction,
         node,
         relaxed: true,
+        lockZone: true,
       );
     }
     // 两个方向都找不到候选（例如控制栏第一个按钮再按 UP）时，同步把焦点
@@ -107,6 +112,9 @@ class _FocusCandidate {
   final FocusNode node;
   final Rect rect;
 }
+
+/// 屏幕上的导航区域。上下键锁区，左右键跨区。
+enum _NavZone { rail, content, bottomBar }
 
 /// 设置滑块注册项：TvAdjustableSlider 把自己的 FocusNode 与方向键处理函数
 /// 登记进来。TvDirectionalFocusAction 是每次方向键必然触发的唯一入口，
@@ -268,6 +276,14 @@ class TvFocusController {
     return pageLike || tallRail;
   }
 
+  /// 屏幕区域划分（用于上下方向导航锁定）。侧栏在最左 ~77px，底部播放控制栏
+  /// 在最下 ~58px。主内容区就是红线画的那块。用当前控件中心点归类。
+  static _NavZone zoneOf(Offset center, Size screen) {
+    if (center.dy >= screen.height - 62) return _NavZone.bottomBar;
+    if (center.dx <= 80) return _NavZone.rail;
+    return _NavZone.content;
+  }
+
   /// 同步保证「当前焦点一定是一个可见控件」。
   ///
   /// 方向键走到边界（例如控制栏第一个按钮再按 UP）时两个方向的
@@ -410,6 +426,7 @@ class TvFocusController {
     FocusNode current, {
     bool relaxed = false,
     FocusNode? exclude,
+    bool lockZone = false,
   }) {
     final currentRect = rectOf(current);
     if (currentRect == null) {
@@ -422,6 +439,16 @@ class TvFocusController {
     final candidates = collectCandidates(FocusManager.instance.rootScope);
     final cur = currentRect.center;
     const double epsilon = 2.0;
+    // 上下方向导航锁定在当前区域（侧栏 / 主内容区 / 底部控制栏）内。
+    // 全宽内容行的中心 x 与工具栏按钮差很多，旧评分会让它输给「垂直更近
+    // 但属于侧栏」的小图标，按 DOWN 就跳过整个红线主内容区、落到侧栏或
+    // 底部播放控制栏（用户实测反馈）。左右方向仍允许跨区，保证从侧栏按
+    // RIGHT 能进入主内容区。
+    final _NavZone? zone =
+        lockZone && (direction == TraversalDirection.up ||
+                direction == TraversalDirection.down)
+            ? zoneOf(cur, screen)
+            : null;
 
     // 抽屉 / 对话框 / 弹出菜单打开时把焦点锁在该浮层内部；主界面则允许
     // 跨越左侧栏、内容区、底部播放栏等不同的 FocusScope —— 早期版本用
@@ -442,6 +469,10 @@ class TvFocusController {
 
     for (final candidate in candidates) {
       if (candidate.node == current || candidate.node == exclude) continue;
+      if (zone != null &&
+          zoneOf(candidate.rect.center, screen) != zone) {
+        continue;
+      }
       final layer = _modalLayerOf(candidate.node);
       if (activeLayer != null) {
         if (layer != activeLayer) continue;
@@ -1071,8 +1102,17 @@ class _TvFocusScopeState extends State<TvFocusScope> {
       debugPrint('[TVFOCUS] restore=$ok');
       return true;
     }
-    if (!TvFocusController.instance.moveFocus(direction, focus)) {
-      TvFocusController.instance.moveFocus(direction, focus, relaxed: true);
+    if (!TvFocusController.instance.moveFocus(
+      direction,
+      focus,
+      lockZone: true,
+    )) {
+      TvFocusController.instance.moveFocus(
+        direction,
+        focus,
+        relaxed: true,
+        lockZone: true,
+      );
     }
     TvFocusController.instance.restoreFocusNow();
     return true;
