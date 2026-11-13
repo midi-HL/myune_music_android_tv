@@ -81,29 +81,8 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
     return KeyEventResult.handled;
   }
 
-  static bool _isEditableFocus(FocusNode node) {
-    final context = node.context;
-    if (context == null) return false;
-    final widget = context.widget;
-    if (widget is EditableText ||
-        widget is TextField ||
-        widget is TextFormField) {
-      return true;
-    }
-    var found = false;
-    context.visitAncestorElements((element) {
-      final candidate = element.widget;
-      if (candidate is EditableText ||
-          candidate is TextField ||
-          candidate is TextFormField) {
-        found = true;
-        return false;
-      }
-      if (candidate is Scaffold || candidate is Dialog) return false;
-      return true;
-    });
-    return found;
-  }
+  static bool _isEditableFocus(FocusNode node) =>
+      TvFocusController.isEditableFocus(node);
 }
 
 class _FocusCandidate {
@@ -149,6 +128,33 @@ class TvFocusController {
 
   /// 播放页注册了页面级 Shortcuts 接管时，全局兜底应放行，不重复驱动。
   bool get hasRestoreHandler => _restoreHandler != null;
+
+  /// 输入框（含祖先里的 EditableText / TextField / TextFormField）。方向键
+  /// 必须放行给框架做光标移动，不能被焦点导航吞掉。
+  static bool isEditableFocus(FocusNode? node) {
+    if (node == null) return false;
+    final context = node.context;
+    if (context == null) return false;
+    final widget = context.widget;
+    if (widget is EditableText ||
+        widget is TextField ||
+        widget is TextFormField) {
+      return true;
+    }
+    var found = false;
+    context.visitAncestorElements((element) {
+      final candidate = element.widget;
+      if (candidate is EditableText ||
+          candidate is TextField ||
+          candidate is TextFormField) {
+        found = true;
+        return false;
+      }
+      if (candidate is Scaffold || candidate is Dialog) return false;
+      return true;
+    });
+    return found;
+  }
 
   /// 同步恢复焦点：焦点本来就有效时**不要动它**（否则会覆盖 moveFocus
   /// 刚完成的移动，方向键就永远跳回第一个按钮）；只有真的落空 / 不可见时，
@@ -1070,38 +1076,40 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     return null;
   }
 
-  /// 方向键兜底：直接驱动几何导航，不依赖 Shortcuts 从 primaryFocus.context
-  /// 向上查找 Actions。
+  /// 方向键兜底：统一驱动所有页面的方向键，不依赖 Shortcuts 从
+  /// primaryFocus.context 向上查找 Actions。
   ///
-  /// 播放页注册了页面级 Shortcuts/Actions 接管（_PlayPageArrowAction），
-  /// 此时放行，避免重复驱动。其余页面由这里接管：
-  ///  * 焦点在 rootScope / 不可见 / 整页容器上 -> 同步落焦到第一个可见控件，
-  ///    吞掉本次按键（只落位、不移动）；
-  ///  * 焦点有效 -> 直接 moveFocus（严格 + relaxed 两次），并兜底保持有效
-  ///    焦点，吞掉按键避免 Shortcuts 二次处理。
+  /// 播放页曾注册页面级 Shortcuts/Actions 接管（只处理控制栏），一旦放行
+  /// 给它，抽屉 / 对话框里的焦点不在控制栏，那个 Action 返回 ignored 把
+  /// 按键吞掉，抽屉就完全不能用遥控器操作（实测歌词显示设置抽屉 6 帧不动）。
+  /// 现在这里接管全部：输入框放行给框架做光标、设置滑块交给滑块处理器、
+  /// 其余走几何导航（上下锁区），并吞掉按键避免页面级 Action 二次驱动。
   bool _onHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     final direction = _directionOf(event.logicalKey);
     if (direction == null) return false;
-    // 播放页有自己的页面级接管，交给它处理。
-    if (TvFocusController.instance.hasRestoreHandler) return false;
 
     final manager = FocusManager.instance;
     final focus = manager.primaryFocus;
+    // 1) 输入框方向键交给框架做光标移动，不能吞。
+    if (TvFocusController.isEditableFocus(focus)) return false;
+
     final valid = focus != null &&
         focus != manager.rootScope &&
         TvFocusController.isValidFocus(focus);
-    debugPrint(
-      '[TVFOCUS] dir=$direction valid=$valid handler='
-      '${TvFocusController.instance.hasRestoreHandler} '
-      'focus=${focus?.debugLabel ?? "null"} '
-      'candidates=${TvFocusController.collectCandidates(manager.rootScope).length}',
-    );
     if (!valid) {
-      final ok = TvFocusController.instance.restoreFocusNow();
-      debugPrint('[TVFOCUS] restore=$ok');
+      // 2) 焦点落空 / 不可见：同步落焦到第一个可见控件，只落位不移动。
+      TvFocusController.instance.restoreFocusNow();
       return true;
     }
+
+    // 3) 设置类滑块：调值方向交给滑块，离开方向由滑块自己调几何导航。
+    if (TvFocusController.instance.handleSliderKey(direction, focus)) {
+      TvFocusController.instance.restoreFocusNow();
+      return true;
+    }
+
+    // 4) 几何导航（严格 + relaxed 两次），上下键锁在当前区域内。
     if (!TvFocusController.instance.moveFocus(
       direction,
       focus,
