@@ -37,10 +37,10 @@
 
 ## 0. 本次更新与功能总览
 
-### 0.1 本版（v1.5.1）更新了什么
+### 0.1 本版（v1.6.0）更新了什么
 
 > 采用语义化版本：新增功能升 minor、只修 bug 升 patch，每次发版**新建独立 tag / Release**
-> （`v1.0.0` → `v1.1.0` → `v1.1.1` → `v1.1.2` → `v1.2.0` → `v1.3.0` → `v1.4.0` → `v1.5.0` → **`v1.5.1`**）。
+> （`v1.0.0` → `v1.1.0` → `v1.1.1` → `v1.1.2` → `v1.2.0` → `v1.3.0` → `v1.4.0` → `v1.5.0` → `v1.5.1` → **`v1.6.0`**）。
 > 这样应用内「检查更新」能通过 `/releases/latest` 感知到新版本，也能随时回滚到任一构建。
 > 具体**缺陷修复清单**写在对应版本的 Release 发布说明里。
 
@@ -64,6 +64,8 @@
 | **v1.5.0 Google Drive 配对助手** | 新增 `gdrive-pair/`（Go + Fyne，参考 Kazumi 的 Material 3 深色 / 圆角卡片 / 侧边导航 + 顶部栏）：设置缺失自动跳转并永久保存、支持直接输入授权码、按现有登录方式与电视配对；手机扫码配页同步改版 |
 | **v1.5.1 字号真正修复** | A/B 像素对比发现 v1.5.0 的字号改动与旧 clamp 下限数值相同、画面零变化；本版显式降到 15 / 10.5 视觉像素且不再经过 clamp，并加防复发断言 |
 | **v1.5.1 Windows 助手** | 补齐 `gdrive-pair-windows-amd64.exe`，与 Linux amd64 / arm64 一并作为 Release 附件；明确不做手机原生 App（理由见 `gdrive-pair/README.md`） |
+| **v1.6.0 B站收藏夹** | 新增「B站收藏夹」分区：先列账号收藏夹（名称/条目数，默认夹置顶），选中后读该收藏夹视频，可加载更多；只读取 B 站账号收藏列表，需扫码登录（现有登录态即可，无需抓包）。与「本地收藏」星标并存、分两个入口 |
+| **v1.6.0 历史记录约束** | 「历史播放」继续读本机记录（`BiliLibraryStore`），不接 B 站服务端观看历史 API |
 
 **2026-11-12：反哺 [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
@@ -128,7 +130,7 @@ Android TV 启动器共用；TV 桌面另有 320×180 横幅。
 | 上游原文说明 | [UPSTREAM_README.md](UPSTREAM_README.md)（原样保留） |
 | **本改版开源仓库** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | 本改版协议 | **Apache License 2.0**（与上游一致） |
-| 本改版版本 | `1.5.1`（见 `lib/tv/tv_app_info.dart`） |
+| 本改版版本 | `1.6.0`（见 `lib/tv/tv_app_info.dart`） |
 
 本仓库**保留了上游完整提交历史**（未 squash、未改写），所有改版内容以新增提交与 tag 形式记录，
 可随时回滚。改动清单见 [NOTICE](NOTICE) 与 [ANDROID_PORT_HANDOFF.md](ANDROID_PORT_HANDOFF.md)。
@@ -435,6 +437,7 @@ keystore 与密码不进入仓库。
 | **`v1.4.0`** | **播放页字号 / 模糊视觉归一、播放页歌词设置内新增实时「歌词选择」、Google Drive 测试状态限制与重授权说明** |
 | **`v1.5.0`** | **修复歌曲名 / 作曲家字号过大 + 锁大屏放大、保留一次性静态模糊不新增实时模糊、新增 Go/Fyne 图形化 Google Drive 配对助手与手机配页改版** |
 | **`v1.5.1`** | **真正修复歌曲名 / 作曲家字号（A/B 实测确认）、新增 Windows 版配对助手、明确手机端沿用扫码配页** |
+| **`v1.6.0`** | **新增 B 站账号收藏夹分层浏览（与本地星标收藏并存）、历史记录保持本机不接 B 站服务端历史** |
 
 ```bash
 git checkout tv-v4-focus-fix      # 回到某个锚点

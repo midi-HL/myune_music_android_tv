@@ -11,14 +11,25 @@ import '../../services/network/remote_media_registry.dart';
 import 'tv_network_widgets.dart';
 
 /// 「哔哩哔哩」主体分区。顶部只有一行工具条，主体按分区展示内容。
-enum _BiliSection { recommend, search, history, favorites }
+/// - [favorites]：本机星标收藏（推荐/搜索结果里按星标加入，离线可用）。
+/// - [cloudFavorites]：B 站账号的收藏夹（先列收藏夹再进内容，需扫码登录）。
+/// 两者并存、分两个入口，互不覆盖。
+/// - [history] 恒为本机播放记录，不读取 B 站服务端观看历史。
+enum _BiliSection {
+  recommend,
+  search,
+  history,
+  favorites,
+  cloudFavorites,
+}
 
 extension _BiliSectionLabel on _BiliSection {
   String get label => switch (this) {
         _BiliSection.recommend => '推荐',
         _BiliSection.search => '搜索结果',
         _BiliSection.history => '历史播放',
-        _BiliSection.favorites => '收藏',
+        _BiliSection.favorites => '本地收藏',
+        _BiliSection.cloudFavorites => 'B站收藏夹',
       };
 
   IconData get icon => switch (this) {
@@ -26,6 +37,7 @@ extension _BiliSectionLabel on _BiliSection {
         _BiliSection.search => Icons.search,
         _BiliSection.history => Icons.history,
         _BiliSection.favorites => Icons.star_border,
+        _BiliSection.cloudFavorites => Icons.folder_special_outlined,
       };
 }
 
@@ -63,6 +75,15 @@ class BilibiliViewState extends State<BilibiliView>
   List<String> _searchHistory = <String>[];
   List<Song> _favorites = <Song>[];
   List<Song> _history = <Song>[];
+
+  // B 站账号收藏夹：两层浏览（收藏夹列表 -> 收藏夹内视频）。
+  List<BiliFavFolder> _favFolders = <BiliFavFolder>[];
+  BiliFavFolder? _activeFolder;
+  List<BiliVideo> _favMedias = <BiliVideo>[];
+  int _favPage = 1;
+  bool _favHasMore = false;
+  bool _favLoading = false;
+  String? _favError;
 
   // 详情页「播放全部」按钮的焦点节点：视频详情加载完成后把焦点落到这里，
   // 而不是停留在原位置（用户按 OK 打开详情时焦点仍在列表项上）。
@@ -246,11 +267,18 @@ class BilibiliViewState extends State<BilibiliView>
         setState(() {
           _loggedIn = BiliAuthStore.instance.isLoggedIn || changed;
         });
+        // 若是从「B站收藏夹」的未登录提示跳来，登录成功后直接刷新列表。
+        if (_section == _BiliSection.cloudFavorites) {
+          await _loadFavFolders();
+        }
       }
     } else if (choice == 'logout') {
       await BiliAuthStore.instance.clear();
       if (mounted) setState(() => _loggedIn = false);
       await showTvAlert(context, '已退出哔哩哔哩登录');
+      if (_section == _BiliSection.cloudFavorites) {
+        await _loadFavFolders();
+      }
     }
   }
 
@@ -378,12 +406,102 @@ class BilibiliViewState extends State<BilibiliView>
       _selected = null;
       _detail = null;
       _error = null;
+      // 离开 B 站收藏夹分区时清空层级，下次进入重新拉，避免使用过期列表。
+      if (section != _BiliSection.cloudFavorites) {
+        _activeFolder = null;
+        _favMedias = <BiliVideo>[];
+      }
     });
     if (section == _BiliSection.recommend && _recommend.isEmpty) {
       await _loadRecommend();
     } else if (section == _BiliSection.history ||
         section == _BiliSection.favorites) {
       await _loadLibrary();
+    } else if (section == _BiliSection.cloudFavorites) {
+      await _loadFavFolders();
+    }
+  }
+
+  /// 进入「B站收藏夹」：拉取账号收藏夹列表。
+  Future<void> _loadFavFolders() async {
+    if (mounted) {
+      setState(() {
+        _favLoading = true;
+        _favError = null;
+        _activeFolder = null;
+        _favMedias = <BiliVideo>[];
+      });
+    }
+    try {
+      final folders = await BiliClient.instance.favFolders();
+      if (!mounted) return;
+      setState(() {
+        _favFolders = folders;
+        _favLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _favError = '$error';
+        _favLoading = false;
+      });
+    }
+  }
+
+  /// 选中某个收藏夹，读取第一页内容。
+  Future<void> _openFolder(BiliFavFolder folder) async {
+    setState(() {
+      _activeFolder = folder;
+      _favMedias = <BiliVideo>[];
+      _favPage = 1;
+      _favHasMore = false;
+      _favLoading = true;
+      _favError = null;
+    });
+    try {
+      final pageResult = await BiliClient.instance.favFolderMedias(
+        folder.mediaId,
+        pn: 1,
+      );
+      if (!mounted) return;
+      setState(() {
+        _favMedias = pageResult.videos;
+        _favHasMore = pageResult.hasMore;
+        _favLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _favError = '$error';
+        _favLoading = false;
+      });
+    }
+  }
+
+  /// 「加载更多」：按 has_more 翻页，追加到当前列表。
+  Future<void> _loadMoreFavMedias() async {
+    final folder = _activeFolder;
+    if (folder == null || _favLoading || !_favHasMore) return;
+    setState(() => _favLoading = true);
+    try {
+      final next = _favPage + 1;
+      final pageResult = await BiliClient.instance.favFolderMedias(
+        folder.mediaId,
+        pn: next,
+      );
+      if (!mounted) return;
+      setState(() {
+        _favPage = next;
+        _favMedias = <BiliVideo>[..._favMedias, ...pageResult.videos];
+        _favHasMore = pageResult.hasMore;
+        _favLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _favError = '$error';
+        _favLoading = false;
+      });
     }
   }
 
@@ -659,10 +777,12 @@ class BilibiliViewState extends State<BilibiliView>
   }
 
   Widget _buildMainList(ColorScheme scheme) {
-    if (_loading) {
+    // 收藏夹用自己的 _favLoading / _favError，避免推荐/搜索的全局状态
+    // （例如切走时仍在加载）把新分区整个盖成进度条。
+    if (_loading && _section != _BiliSection.cloudFavorites) {
       return const Center(child: CircularProgressIndicator());
     }
-    if (_error != null) {
+    if (_error != null && _section != _BiliSection.cloudFavorites) {
       return _buildMessage(
         scheme,
         icon: Icons.error_outline,
@@ -719,13 +839,126 @@ class BilibiliViewState extends State<BilibiliView>
           return _buildMessage(
             scheme,
             icon: Icons.star_border,
-            message: '还没有收藏，在推荐 / 搜索结果里按星标即可收藏',
+            message: '还没有本地收藏，在推荐 / 搜索结果里按星标即可收藏',
             actionLabel: '去推荐',
             onAction: () => _switchSection(_BiliSection.recommend),
           );
         }
         return _buildSongList(_favorites);
+      case _BiliSection.cloudFavorites:
+        if (_favLoading && _favFolders.isEmpty && _favMedias.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        if (_favError != null) {
+          final needLogin =
+              _favError!.contains('登录') || _favError!.contains('权限');
+          return _buildMessage(
+            scheme,
+            icon: Icons.cloud_off_outlined,
+            message: _favError!,
+            actionLabel: needLogin ? '去登录' : '重试',
+            onAction: () {
+              if (needLogin) {
+                _openAccount();
+                return;
+              }
+              final folder = _activeFolder;
+              if (folder == null) {
+                _loadFavFolders();
+              } else {
+                _openFolder(folder);
+              }
+            },
+          );
+        }
+        if (_activeFolder == null) {
+          if (_favFolders.isEmpty) {
+            return _buildMessage(
+              scheme,
+              icon: Icons.folder_special_outlined,
+              message: '账号下还没有收藏夹，可在 B 站 App / 网页里收藏视频后重试',
+              actionLabel: '重新加载',
+              onAction: _loadFavFolders,
+            );
+          }
+          return _buildFavFolderList();
+        }
+        return _buildFavMediaList();
     }
+  }
+
+  /// 第一层：账号的收藏夹列表。
+  Widget _buildFavFolderList() {
+    return ListView.separated(
+      itemCount: _favFolders.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 5),
+      itemBuilder: (context, index) {
+        final folder = _favFolders[index];
+        return TvActionButton(
+          label: folder.isDefault ? '${folder.title}（默认）' : folder.title,
+          value: '${folder.mediaCount} 个内容',
+          icon: folder.isDefault
+              ? Icons.favorite_border
+              : Icons.folder_open_outlined,
+          onPressed: () => _openFolder(folder),
+        );
+      },
+    );
+  }
+
+  /// 第二层：某个收藏夹内的视频列表（顶部可返回、底部可翻页）。
+  Widget _buildFavMediaList() {
+    final folder = _activeFolder!;
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            SizedBox(
+              width: 190,
+              child: TvActionButton(
+                label: '返回收藏夹',
+                icon: Icons.arrow_back,
+                onPressed: _loadFavFolders,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '${folder.title} · ${_favMedias.length} 项',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Expanded(
+          child: _favMedias.isEmpty
+              ? Center(
+                  child: Text(
+                    _favLoading ? '正在加载…' : '该收藏夹暂无可播放的视频',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                )
+              : _buildVideoList(_favMedias, showFavoriteButton: false),
+        ),
+        if (_favHasMore)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: SizedBox(
+              height: 44,
+              child: TvActionButton(
+                label: _favLoading ? '正在加载…' : '加载更多',
+                icon: Icons.expand_more,
+                onPressed: _favLoading ? () {} : _loadMoreFavMedias,
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _buildMessage(
@@ -763,7 +996,10 @@ class BilibiliViewState extends State<BilibiliView>
     );
   }
 
-  Widget _buildVideoList(List<BiliVideo> videos) {
+  Widget _buildVideoList(
+    List<BiliVideo> videos, {
+    bool showFavoriteButton = true,
+  }) {
     return ListView.separated(
       itemCount: videos.length,
       separatorBuilder: (_, __) => const SizedBox(height: 5),
@@ -781,13 +1017,16 @@ class BilibiliViewState extends State<BilibiliView>
                 onPressed: () => _openDetail(video),
               ),
             ),
-            const SizedBox(width: 8),
-            TvIconButton(
-              icon: favorited ? Icons.star : Icons.star_border,
-              semanticLabel: favorited ? '取消收藏' : '收藏',
-              size: 34,
-              onPressed: () => _toggleFavoriteVideo(video),
-            ),
+            // B 站收藏夹视图不显示本机星标按钮，避免与账号收藏混淆。
+            if (showFavoriteButton) ...<Widget>[
+              const SizedBox(width: 8),
+              TvIconButton(
+                icon: favorited ? Icons.star : Icons.star_border,
+                semanticLabel: favorited ? '取消收藏' : '收藏',
+                size: 34,
+                onPressed: () => _toggleFavoriteVideo(video),
+              ),
+            ],
           ],
         );
       },

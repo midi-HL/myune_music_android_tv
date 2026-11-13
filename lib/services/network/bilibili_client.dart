@@ -121,6 +121,33 @@ class BiliAuthStore {
   }
 }
 
+/// B 站账号「收藏夹」元数据。
+///
+/// [mediaId] 是 `created/list-all` 返回的 `id`（完整 mlid），**不是** `fid`
+/// （原始 id）也不是 `mid`（创建者 mid）；后续 `resource/list` 用它作
+/// `media_id`。[isDefault] 由 `attr` 的位 1 判断：0 为默认收藏夹。
+class BiliFavFolder {
+  const BiliFavFolder({
+    required this.mediaId,
+    required this.title,
+    required this.mediaCount,
+    required this.isDefault,
+  });
+
+  final int mediaId;
+  final String title;
+  final int mediaCount;
+  final bool isDefault;
+}
+
+/// 一个收藏夹的一页内容。
+class BiliFavPage {
+  const BiliFavPage({required this.videos, required this.hasMore});
+
+  final List<BiliVideo> videos;
+  final bool hasMore;
+}
+
 /// B 站公开 Web API 客户端。
 ///
 /// 参考 BiliMusic-Desktop 的功能范围：关键词搜索、分页、分 P 展开、单独播放 /
@@ -741,6 +768,141 @@ class BiliClient {
     } catch (_) {
       return <BiliSubtitleLine>[];
     }
+  }
+
+  // ===== 账号收藏夹（只读）=====
+
+  /// 从登录 Cookie 里取 DedeUserID，作为收藏夹接口的 `up_mid`。
+  /// 扫码登录保存的 Cookie 已含该字段，无需用户额外提供 / 抓包。
+  String? get loggedInMid {
+    final cookie = BiliAuthStore.instance.cookie;
+    if (cookie == null || cookie.isEmpty) return null;
+    for (final part in cookie.split(';')) {
+      final i = part.indexOf('=');
+      if (i < 0) continue;
+      if (part.substring(0, i).trim() != 'DedeUserID') continue;
+      final value = part.substring(i + 1).trim();
+      return value.isEmpty ? null : value;
+    }
+    return null;
+  }
+
+  /// 列出账号创建的所有收藏夹（含默认收藏夹）。
+  /// 文档：`GET /x/v3/fav/folder/created/list-all?up_mid=<mid>`，
+  /// 认证 Cookie(SESSDATA)；返回 `data.list[].id` 即完整 media_id。
+  Future<List<BiliFavFolder>> favFolders() async {
+    await _ensureIdentity();
+    final mid = loggedInMid;
+    if (mid == null) {
+      throw StateError('请先扫码登录 B 站账号，再查看收藏夹');
+    }
+    final json = await _getJson(
+      Uri.https(
+        'api.bilibili.com',
+        '/x/v3/fav/folder/created/list-all',
+        <String, String>{'up_mid': mid, 'type': '2'},
+      ),
+    );
+    final code = json['code'] is num ? (json['code'] as num).toInt() : -1;
+    if (code == -403) {
+      throw StateError('收藏夹权限不足，请重新登录 B 站账号');
+    }
+    if (code != 0) {
+      throw StateError('读取收藏夹失败：${json['message'] ?? code}');
+    }
+    final data = json['data'];
+    final list = data is Map ? data['list'] : null;
+    if (list is! List) return <BiliFavFolder>[];
+    final folders = <BiliFavFolder>[];
+    for (final item in list) {
+      if (item is! Map) continue;
+      final rawId = item['id'];
+      final mediaId =
+          rawId is num ? rawId.toInt() : int.tryParse('$rawId');
+      if (mediaId == null || mediaId <= 0) continue;
+      final attr = item['attr'] is num ? (item['attr'] as num).toInt() : 0;
+      final count = item['media_count'] is num
+          ? (item['media_count'] as num).toInt()
+          : 0;
+      folders.add(
+        BiliFavFolder(
+          mediaId: mediaId,
+          title: (item['title'] ?? '未命名收藏夹').toString(),
+          mediaCount: count,
+          isDefault: ((attr >> 1) & 1) == 0,
+        ),
+      );
+    }
+    // 默认收藏夹置顶，其余按标题排序，方便遥控器逐层浏览。
+    folders.sort((a, b) {
+      if (a.isDefault != b.isDefault) return a.isDefault ? -1 : 1;
+      return a.title.compareTo(b.title);
+    });
+    return folders;
+  }
+
+  /// 读取某个收藏夹的一页内容。
+  /// 文档：`GET /x/v3/fav/resource/list?media_id=<id>&pn=&ps=1..20`，
+  /// 分页看 `data.has_more`（该接口没有 total 字段）。
+  /// 只保留有 bvid 且未失效的视频稿件，转成 [BiliVideo] 复用现有详情/播放链路。
+  Future<BiliFavPage> favFolderMedias(
+    int mediaId, {
+    int pn = 1,
+    int ps = 20,
+  }) async {
+    await _ensureIdentity();
+    final json = await _getJson(
+      Uri.https(
+        'api.bilibili.com',
+        '/x/v3/fav/resource/list',
+        <String, String>{
+          'media_id': '$mediaId',
+          'pn': '$pn',
+          'ps': '${ps.clamp(1, 20)}',
+          'platform': 'web',
+          'type': '0',
+        },
+      ),
+    );
+    final code = json['code'] is num ? (json['code'] as num).toInt() : -1;
+    if (code == -403) {
+      throw StateError('该收藏夹权限不足，请重新登录 B 站账号');
+    }
+    if (code != 0) {
+      throw StateError('读取收藏夹内容失败：${json['message'] ?? code}');
+    }
+    final data = json['data'];
+    final medias = data is Map ? data['medias'] : null;
+    final videos = <BiliVideo>[];
+    if (medias is List) {
+      for (final item in medias) {
+        if (item is! Map) continue;
+        final bvid = (item['bvid'] ?? item['bv_id'] ?? '').toString().trim();
+        // 音频(type=12) / 视频合集(type=21) 没有 bvid，暂不纳入播放列表。
+        if (bvid.isEmpty) continue;
+        final attr = item['attr'] is num ? (item['attr'] as num).toInt() : 0;
+        if (attr == 9 || attr == 1) continue; // 已删除 / 已失效
+        final upper = item['upper'];
+        final author = upper is Map ? (upper['name'] ?? '').toString() : '';
+        final duration = item['duration'] is num
+            ? (item['duration'] as num).toInt()
+            : 0;
+        videos.add(
+          BiliVideo(
+            bvid: bvid,
+            title: (item['title'] ?? '未命名').toString(),
+            author: author.isEmpty ? '哔哩哔哩' : author,
+            cover: _normalizeCover((item['cover'] ?? '').toString()),
+            description: (item['intro'] ?? '').toString(),
+            durationSeconds: duration,
+          ),
+        );
+      }
+    }
+    return BiliFavPage(
+      videos: videos,
+      hasMore: data is Map && data['has_more'] == true,
+    );
   }
 
   // ===== 二维码扫码登录 =====
