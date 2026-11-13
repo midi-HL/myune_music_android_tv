@@ -31,6 +31,7 @@ import '../../services/notification_service.dart';
 import '../../services/android_content_resolver.dart';
 import '../../services/network/remote_media_registry.dart';
 import '../../utils/search_debouncer.dart';
+import '../../lyrics/lyric_source.dart';
 import '../../lyrics/lyrics_handler.dart';
 
 enum SortCriterion { title, artist, dateModified, file, random, trackNumber }
@@ -225,6 +226,16 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   // --- 歌词相关 --
   late final LyricsHandler _lyricsHandler;
+  /// 播放页「歌词选择」：本次临时切换歌词来源并立即生效，不改任何持久化设置。
+  Future<void> selectLyricSource(
+    LyricSource source, {
+    bool refreshOnline = false,
+  }) =>
+      _lyricsHandler.selectLyricSource(
+        source,
+        refreshOnline: refreshOnline,
+      );
+
   List<LyricLine> get currentLyrics => _lyricsHandler.currentLyrics;
   int get currentLyricLineIndex => _lyricsHandler.currentLyricLineIndex;
   Stream<int> get lyricLineIndexStream => _lyricsHandler.lyricLineIndexStream;

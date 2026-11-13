@@ -34,6 +34,16 @@ loopback 登录，拿到 refresh_token 后自动 POST 到电视上的配对页�
 - refresh_token 只提交到局域网里这台电视，不经过任何第三方服务。
 - 脚本不保存任何凭据到磁盘；完成后请把 Cloud Console 的密钥当作普通配置保管。
 - 电视端只请求 drive.readonly，不会上传、重命名或删除任何文件。
+
+重授权（约每 7 天一次）
+----------------------
+测试状态 (Testing) 的 Cloud 项目签发的 refresh_token 会在 7 天后过期，
+refresh_token 换取 access_token 时 Google 返回 invalid_grant。此时无需改任何
+配置，只需：
+  1. 在电视上重新打开「添加 Google Drive」，取得新的二维码 / --pair-url；
+  2. 用原来的 --client-id / --client-secret 再跑一次本脚本即可。
+--pair-url 也可以省略，脚本会提示从电视上复制；--client-id / --client-secret
+可通过环境变量 GDRIVE_CLIENT_ID / GDRIVE_CLIENT_SECRET 固定，方便重复执行。
 """
 
 import argparse

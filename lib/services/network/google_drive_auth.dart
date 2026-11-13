@@ -73,9 +73,22 @@ class GoogleDriveAuth {
       throw StateError('无法连接 Google 账号服务：$error');
     }
     if (response.statusCode != 200) {
+      // Testing 状态的应用，Google 签发的 refresh_token 只有 7 天有效期；
+      // 过期后 token 端点返回 invalid_grant。给出可操作的重授权指引，
+      // 而不是让用户面对一句笼统的 400 错误。
+      final detail = _errorDetail(response.body);
+      final expired = detail.toLowerCase().contains('invalid_grant') ||
+          detail.toLowerCase().contains('token has been expired') ||
+          detail.toLowerCase().contains('revoked');
+      if (expired) {
+        throw StateError(
+          'Google Drive 授权已过期（Testing 应用的 refresh_token 有效期为 7 天）'
+          '。请在电视上重新打开「添加 Google Drive」，再用 '
+          'tools/gdrive_auth.py 重跑一次授权即可',
+        );
+      }
       throw StateError(
-        '刷新 Google Drive 授权失败（${response.statusCode}）'
-        '${_errorDetail(response.body)}',
+        '刷新 Google Drive 授权失败（${response.statusCode}）$detail',
       );
     }
     final decoded = jsonDecode(utf8.decode(response.bodyBytes));

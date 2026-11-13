@@ -191,6 +191,57 @@ class LyricsHandler {
     _notifyListeners();
   }
 
+  /// 播放页「歌词选择」：本次临时切换到指定歌词来源并立即重新加载。
+  ///
+  /// 与设置页的「歌词来源优先级」互不干涉：这里**不读写任何持久化设置**，
+  /// 只改变当前这首歌正在显示的歌词，因此「修改即生效」，也不影响下次切歌。
+  /// 外置文件会按 .lrc / .krc / .qrc / .yrc 顺序逐个尝试，有什么格式用什么格式。
+  /// [refreshOnline] 为 true 时表示用户主动「从网上获取新歌词」，
+  /// 此时忽略「启用在线歌词」开关并重新向三家平台发起搜索。
+  Future<void> selectLyricSource(
+    LyricSource source, {
+    bool refreshOnline = false,
+  }) async {
+    final song = _getCurrentSong();
+    if (song == null) return;
+    final path = song.filePath;
+
+    _releaseLockedLyricLine();
+    _currentLyrics = [];
+    _currentLyricLineIndex = -1;
+    _lyricLineIndexController.add(-1);
+    _notifyListeners();
+
+    // 在线歌词 / 主动刷新：直接走在线搜索流水线。
+    if (source == LyricSource.online || refreshOnline) {
+      await _loadOnlineLyricsPipeline(
+        song,
+        preferredSource: _preferredOnlineSource(),
+      );
+      return;
+    }
+
+    // 网络媒体（WebDAV / FTP / 哔哩哔哩 / Google Drive）没有本地文件路径，
+    // 本地来源只能走在线兜底；顺带沿用网络字幕链路的既有行为。
+    if (RemoteMediaRegistry.isNetwork(path)) {
+      unawaited(_loadNetworkLyricsPipeline(song, path));
+      return;
+    }
+
+    if (source == LyricSource.embedded) {
+      await _loadEmbeddedLyrics(path);
+    } else {
+      // 外置文件：合并所有扩展名，按实际存在的格式取用。
+      for (final external in LyricSource.values.where(
+        (candidate) => candidate.isExternalFile,
+      )) {
+        await _loadExternalLyrics(path, external);
+        if (_currentLyrics.isNotEmpty) return;
+      }
+    }
+    _notifyListeners();
+  }
+
   // 当前选中的网络歌词主源
   String _preferredOnlineSource() {
     switch (_settingsProvider.primaryLyricSource) {

@@ -291,19 +291,27 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
           );
         }
 
-        // 静态高斯模糊背景部分
+        // 静态高斯模糊背景部分。
+        // Android/TV 的 _AndroidUiScaler 把整棵树布局在放大的虚拟画布上再
+        // Transform.scale 缩回，ImageFilter.blur 的 sigma（逻辑像素）会跟着
+        // 一起缩小，视觉模糊半径只剩桌面端的 visualScale 倍；源封面又被
+        // BoxFit.cover 拉伸到虚拟大画布，Skia 对大 sigma 的降采样优化会让
+        // 背景看起来「分辨率低、糊得不够」。按 1/visualScale 补偿 sigma 使
+        // 视觉半径与桌面端一致，并提高插值质量（桌面端 visualScale=1.0，行为不变）。
+        final double visual = UiScaleScope.of(context).clamp(0.5, 1.5);
         return Stack(
           fit: StackFit.expand,
           children: [
             ImageFiltered(
               imageFilter: ui.ImageFilter.blur(
-                sigmaX: 40,
-                sigmaY: 40,
+                sigmaX: 40 / visual,
+                sigmaY: 40 / visual,
                 tileMode: TileMode.decal,
               ),
               child: Image.memory(
                 currentSong!.albumArt!,
                 fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
                 errorBuilder: (context, error, stackTrace) =>
                     Container(color: Theme.of(context).colorScheme.surface),
               ),
@@ -517,10 +525,25 @@ class _SongDetailPageState extends State<SongDetailPage> {
     // 都与桌面端一致，不会再出现整体偏小、控件栏过细的问题。
     final double scale = playPageScale(context);
 
+    // Android/TV 全局视觉缩放系数。桌面端没有 UiScaleScope 节点，返回 1.0，
+    // 因此下面所有归一运算在桌面端都是恒等变换，行为完全不变。
+    final double visual = UiScaleScope.of(context).clamp(0.5, 1.5);
+
+    // Android 系统「字体大小」会通过 MediaQuery.textScaler 二次放大所有文字；
+    // 桌面端没有这一层。播放页的字号由应用内「歌词显示设置」精确控制，
+    // 这里把系统缩放压制到 1.0 上限（调小仍保留），避免电视端整体偏大。
+    // 这是「让同一个设置值在两端视觉一致」，而不是改小任何设置默认值。
+    final double systemTextScale =
+        MediaQuery.textScalerOf(context).scale(16) / 16.0;
+
     // 播放页方向键就近接管：Shortcuts 必须放在 Actions 之下（同 TvFocusScope
     // 的结构），控件栏内方向键完全由 _PlayPageArrowAction 处理；抽屉 / 浮层
     // 里返回 ignored，事件继续冒泡到全局 TvDirectionalFocusAction。
-    return Shortcuts(
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: TextScaler.linear(systemTextScale.clamp(0.8, 1.0)),
+      ),
+      child: Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.arrowUp):
             _PlayPageArrowIntent(TraversalDirection.up),
@@ -679,16 +702,21 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                                 baseImageSize,
                                               );
 
-                                              // 根据图片大小计算字体大小
+                                              // 根据图片大小计算字体大小。
+                                              // clamp 边界是「视觉像素」常量：在 Android 上必须除以
+                                              // visualScale 转成逻辑像素，否则会被 Transform.scale
+                                              // 缩小，且大屏上 imageSize 被放大后会顶到上限，出现
+                                              // 「歌曲名 / 作曲家比桌面端大」的问题。桌面端
+                                              // visualScale=1.0，公式与上游原版完全一致。
                                               final double titleFontSize =
                                                   (imageSize * 0.05).clamp(
-                                                    20.0,
-                                                    32.0,
+                                                    20.0 / visual,
+                                                    32.0 / visual,
                                                   );
                                               final double artistFontSize =
                                                   (imageSize * 0.03).clamp(
-                                                    14.0,
-                                                    28.0,
+                                                    14.0 / visual,
+                                                    28.0 / visual,
                                                   );
 
                                               final borderRadius =
@@ -1003,6 +1031,7 @@ class _SongDetailPageState extends State<SongDetailPage> {
         ),
       ),
         ),
+      ),
       ),
     );
   }

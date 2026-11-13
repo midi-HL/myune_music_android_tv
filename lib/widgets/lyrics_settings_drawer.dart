@@ -1,12 +1,36 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../page/setting/settings_provider.dart';
+import '../page/playlist/playlist_content_notifier.dart';
+import '../page/network/tv_network_widgets.dart';
+import '../lyrics/lyric_source.dart';
 import "../page/setting/tabs/info_icon.dart";
 import '../tv/tv_device.dart';
 import '../tv/tv_focus_nav.dart';
 
 class LyricsSettingsDrawer extends StatelessWidget {
   const LyricsSettingsDrawer({super.key});
+
+  /// 播放页「歌词选择」：本次临时切换歌词来源，立即重新加载并生效。
+  /// 不写任何持久化设置，设置页里的「歌词来源优先级」保持原样。
+  static Future<void> _selectLyric(
+    BuildContext context,
+    LyricSource source,
+    String label, {
+    bool refreshOnline = false,
+  }) async {
+    await context.read<PlaylistContentNotifier>().selectLyricSource(
+      source,
+      refreshOnline: refreshOnline,
+    );
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('已切换为$label'),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
 
   static String _fontWeightLabel(int weight) {
     const Map<int, String> names = {
@@ -296,6 +320,76 @@ class LyricsSettingsDrawer extends StatelessWidget {
                 //   '当前位置: ${settings.lyricHighlightPosition.toStringAsFixed(1)}',
                 //   style: Theme.of(context).textTheme.bodyMedium,
                 // ),
+
+                // ===== 歌词选择（电视简化）=====
+                // 只追加在播放页歌词设置的下面；上面所有原有设置项保持原样，
+                // 设置页里的「歌词来源优先级」6 项排序也完全不动。
+                // 选中即实时生效，不写任何持久化设置。
+                const Divider(),
+                Text(
+                  '歌词选择',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '选择后立即生效，不会改动设置页里的来源优先级',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TvActionButton(
+                  label: '网络歌词',
+                  value: '在线搜索',
+                  icon: Icons.cloud_outlined,
+                  onPressed: () => _selectLyric(
+                    context,
+                    LyricSource.online,
+                    '网络歌词',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TvActionButton(
+                  label: '内嵌歌词',
+                  value: '音频文件标签',
+                  icon: Icons.audiotrack_outlined,
+                  onPressed: () => _selectLyric(
+                    context,
+                    LyricSource.embedded,
+                    '内嵌歌词',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TvActionButton(
+                  label: '外置文件',
+                  value: '自动识别所有格式',
+                  icon: Icons.insert_drive_file_outlined,
+                  onPressed: () => _selectLyric(
+                    context,
+                    LyricSource.externalLrc,
+                    '外置文件',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                TvActionButton(
+                  label: '从网上获取新歌词',
+                  value: '重新搜索',
+                  icon: Icons.refresh,
+                  onPressed: () => _selectLyric(
+                    context,
+                    LyricSource.online,
+                    '在线歌词',
+                    refreshOnline: true,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '外置文件会自动尝试 .lrc / .krc / .qrc / .yrc 等，'
+                  '目录里有什么格式就用什么格式',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ],
             ),
           ),

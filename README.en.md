@@ -38,11 +38,11 @@
 
 ## 0. What's new & feature overview
 
-### 0.1 What's new in v1.3.0
+### 0.1 What's new in v1.4.0
 
 > Semantic versioning: new features bump the minor version, bug-only fixes bump the patch,
 > and each release gets its **own tag / Release** (`v1.0.0` → `v1.1.0` → `v1.1.1` →
-> `v1.1.2` → `v1.2.0` → **`v1.3.0`**). This lets the in-app update check see new builds via
+> `v1.1.2` → `v1.2.0` → `v1.3.0` → **`v1.4.0`**). This lets the in-app update check see new builds via
 > `/releases/latest` and keeps every build individually rollback-able.
 > **Bug fixes are listed in the Release notes** of the matching version.
 
@@ -58,6 +58,9 @@
 | **v1.2.0 Bilibili cover art** | The left panel now downloads and shows the video cover automatically (async fetch from the cover URL encoded in the proxy URL when `albumArt` is empty), scaled with square `BoxFit.cover` and capped decode size |
 | **v1.2.0 Bilibili audio quality** | No more fixed 360P + first audio track; requests clarity tiers 127 → 80 → 16 and picks the **highest available** track in `dash.audio[]` by Hi-Res / Dolby / bitrate priority |
 | **v1.3.0 read-only Google Drive** | Fourth network source; LAN QR pairing (zero typing on TV), `drive.readonly` only, local auth helper `tools/gdrive_auth.py`, credentials stored only on the TV; shares browse / playback / favourites / metadata pipeline with WebDAV / FTP |
+| **v1.4.0 visual normalization** | Font sizes, line spacing, lyric blur strength and background blur radius are normalized by `UiScaleScope.visualScale`, and Android system font scaling is capped, so the 30.0 / 6.0 / 4.0 values in Lyrics Settings render at the same visual pixel size as on desktop. **No setting defaults were changed.** |
+| **v1.4.0 lyric selection** | A real-time "Lyric selection" block is appended to the now-playing Lyrics Settings: online / embedded / external files (all formats auto-detected) / refetch online. Changes apply immediately and **write no persistent settings**; the full 6-item source priority dialog in Settings is untouched. |
+| **v1.4.0 GDrive notes** | Documented the Testing-status 7-day `refresh_token` expiry, 100 test-user cap, annual restricted-scope security assessment, plus one-command re-authorization and an in-app expiry hint. |
 
 **2026-11-12: backport from [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
@@ -129,7 +132,7 @@ and the existing phone behaviour (immersive mode, UI scaling, SAF) is unchanged.
 | Original upstream README | [UPSTREAM_README.md](UPSTREAM_README.md) (preserved verbatim) |
 | **This fork's repository** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | This fork's license | **Apache License 2.0** (same as upstream) |
-| This fork's version | `1.3.0` (see `lib/tv/tv_app_info.dart`) |
+| This fork's version | `1.4.0` (see `lib/tv/tv_app_info.dart`) |
 
 The **full upstream commit history is preserved** (no squash, no history rewrite). All port
 work is recorded as additional commits and tags so it can be rolled back at any time. See
@@ -339,6 +342,30 @@ One-time setup (about 3 minutes):
 > and pasted into the pairing page. Credentials live only in the TV's local
 > `SharedPreferences`, never logged or committed. Google reachability required.
 
+**About test users and token lifetime (important)**
+
+- Each user creates **their own** Cloud project and is its only test user, so
+  **anyone can complete the steps above**. The 100-user cap applies to a single
+  project's test allowlist; a self-hosted project has exactly one user.
+- However, apps in **Testing** status are issued `refresh_token`s that **expire
+  after 7 days** (Google's rule: only exempt when the sole requested scopes are
+  `userinfo.email/profile/openid`; this app requests `drive.readonly`). So expect
+  to **re-run `gdrive_auth.py` roughly once a week**: open "Add Google Drive"
+  on the TV again to get a fresh QR / `--pair-url`, then run the same command —
+  no other changes needed. The app reports "authorization expired" with the same
+  guidance when the token stops working.
+- Shipping **one client that works out of the box for everyone** requires
+  publishing the consent screen to In production and passing OAuth verification.
+  `drive.readonly` is a **Restricted scope**, which additionally requires brand
+  verification (owned domain + privacy policy), an allowed app category, an
+  end-to-end demo video, a narrowest-scope justification, and an **annual
+  third-party security assessment** by a Google-empanelled assessor (paid).
+  Desktop-app `client_secret` values are explicitly non-secret per Google, so
+  secrecy cannot bypass this. A "published but unverified" app is technically
+  usable by any Google account but carries a 100-user cap and a danger warning.
+  For a personal / self-hosted open-source project, per-user credentials remain
+  the pragmatic choice.
+
 ### 7.2 Bilibili
 
 Following the feature scope and interaction of
@@ -470,6 +497,7 @@ Full history and anchor tags are preserved:
 | `v1.1.2` (later builds) | Now-playing scale restoration and auto-hiding controls, network-drive backport (embedded tags / favourites), D-pad reachability fixes (assets were replaced via `--clobber`) |
 | **`v1.2.0`** | **Dedicated release tags from now on; fixed now-playing D-pad focus (lyric lines stealing focus / focus loss / stray activation of off-screen favorites), Bilibili video cover auto-display with square scaling, highest available Bilibili audio quality** |
 | **`v1.3.0`** | **New read-only Google Drive source: LAN QR pairing, zero typing on TV, local auth helper; model / proxy / service / TV entry and bilingual docs** |
+| **`v1.4.0`** | **Now-playing visual normalization, real-time lyric selection inside Lyrics Settings, Google Drive testing-status limits and re-auth guidance** |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor

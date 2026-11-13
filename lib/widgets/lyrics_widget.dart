@@ -13,6 +13,7 @@ import '../page/playlist/playlist_content_notifier.dart';
 import 'interlude_animation_widget.dart';
 import 'karaoke_line_text.dart';
 import 'lyric_blur.dart';
+import 'ui_scale_scope.dart';
 
 // 歌词 TextButton 的内边距
 const EdgeInsets _kLyricButtonPadding = EdgeInsets.fromLTRB(12, 9, 12, 9);
@@ -1048,12 +1049,18 @@ class _LyricsWidgetState extends State<LyricsWidget>
     final autoAdjustLyricLayout = context.select<SettingsProvider, bool>(
       (s) => s.autoAdjustLyricLayout,
     );
-    double fontSize = context.select<SettingsProvider, double>(
-      (s) => s.fontSize,
-    );
-    double lyricVerticalSpacing = context.select<SettingsProvider, double>(
-      (s) => s.lyricVerticalSpacing,
-    );
+    // Android/TV 把整棵树布局在放大的虚拟画布上再 Transform.scale 缩回，
+    // 所有以「逻辑像素」表达的字号 / 间距 / 模糊半径都会被一起缩小。
+    // 这里统一除以 visualScale，使设置里的 30.0 / 6.0 / 4.0 在电视端的
+    // 视觉像素与桌面端逐像素一致——不改变任何设置值或默认值。
+    // 桌面端没有 UiScaleScope 节点，visual == 1.0，恒等变换。
+    final double visual = UiScaleScope.of(context).clamp(0.5, 1.5);
+
+    double fontSize =
+        context.select<SettingsProvider, double>((s) => s.fontSize) / visual;
+    double lyricVerticalSpacing =
+        context.select<SettingsProvider, double>((s) => s.lyricVerticalSpacing) /
+        visual;
     final int lyricFontWeightValue = context.select<SettingsProvider, int>(
       (s) => s.lyricFontWeight,
     );
@@ -1069,8 +1076,8 @@ class _LyricsWidgetState extends State<LyricsWidget>
       final double scale = (math.sqrt(
         (width * height) / (1150.0 * 620.0),
       )).clamp(0.5, 2.0);
-      fontSize = 22.0 * scale;
-      lyricVerticalSpacing = 6.0 * scale;
+      fontSize = 22.0 * scale / visual;
+      lyricVerticalSpacing = 6.0 * scale / visual;
     }
     final enableLyricBlur = context.select<SettingsProvider, bool>(
       (s) => s.enableLyricBlur,
@@ -1081,9 +1088,11 @@ class _LyricsWidgetState extends State<LyricsWidget>
     final enableLyricFloatingAnimation = context.select<SettingsProvider, bool>(
       (s) => s.enableLyricFloatingAnimation,
     );
-    final lyricBlurStrength = context.select<SettingsProvider, double>(
-      (s) => s.lyricBlurStrength,
-    );
+    // 歌词模糊用 Shadow.blurRadius 模拟，半径同样是逻辑像素，会被
+    // Transform.scale 缩小；按 1/visualScale 补偿后视觉模糊程度与桌面端一致。
+    final lyricBlurStrength =
+        context.select<SettingsProvider, double>((s) => s.lyricBlurStrength) /
+        visual;
 
     final shouldBlur = enableLyricBlur && !_isUserScrolling;
 
