@@ -139,6 +139,9 @@ class TvFocusController {
     _restoreHandler = handler;
   }
 
+  /// 播放页注册了页面级 Shortcuts 接管时，全局兜底应放行，不重复驱动。
+  bool get hasRestoreHandler => _restoreHandler != null;
+
   /// 同步恢复焦点：焦点本来就有效时**不要动它**（否则会覆盖 moveFocus
   /// 刚完成的移动，方向键就永远跳回第一个按钮）；只有真的落空 / 不可见时，
   /// 才用当前页面注册的目标拉回，失败再退回全局可见候选。
@@ -1028,22 +1031,51 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     TvFocusController.instance.scheduleEnsureFocus();
   }
 
-  /// 方向键兜底：焦点不在可见控件上时，同步把它落到当前页面的第一个可见
-  /// 控件并吞掉本次按键（只落位、不移动）。之后焦点有了 context，Shortcuts
-  /// 与 TvDirectionalFocusAction 恢复正常，第二次按键即可在列表里移动。
+  static TraversalDirection? _directionOf(LogicalKeyboardKey key) {
+    if (key == LogicalKeyboardKey.arrowUp) return TraversalDirection.up;
+    if (key == LogicalKeyboardKey.arrowDown) return TraversalDirection.down;
+    if (key == LogicalKeyboardKey.arrowLeft) return TraversalDirection.left;
+    if (key == LogicalKeyboardKey.arrowRight) return TraversalDirection.right;
+    return null;
+  }
+
+  /// 方向键兜底：直接驱动几何导航，不依赖 Shortcuts 从 primaryFocus.context
+  /// 向上查找 Actions。
+  ///
+  /// 播放页注册了页面级 Shortcuts/Actions 接管（_PlayPageArrowAction），
+  /// 此时放行，避免重复驱动。其余页面由这里接管：
+  ///  * 焦点在 rootScope / 不可见 / 整页容器上 -> 同步落焦到第一个可见控件，
+  ///    吞掉本次按键（只落位、不移动）；
+  ///  * 焦点有效 -> 直接 moveFocus（严格 + relaxed 两次），并兜底保持有效
+  ///    焦点，吞掉按键避免 Shortcuts 二次处理。
   bool _onHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
-    final key = event.logicalKey;
-    final isArrow = key == LogicalKeyboardKey.arrowUp ||
-        key == LogicalKeyboardKey.arrowDown ||
-        key == LogicalKeyboardKey.arrowLeft ||
-        key == LogicalKeyboardKey.arrowRight;
-    if (!isArrow) return false;
-    if (TvFocusController.isValidFocus(FocusManager.instance.primaryFocus)) {
-      return false;
+    final direction = _directionOf(event.logicalKey);
+    if (direction == null) return false;
+    // 播放页有自己的页面级接管，交给它处理。
+    if (TvFocusController.instance.hasRestoreHandler) return false;
+
+    final manager = FocusManager.instance;
+    final focus = manager.primaryFocus;
+    final valid = focus != null &&
+        focus != manager.rootScope &&
+        TvFocusController.isValidFocus(focus);
+    debugPrint(
+      '[TVFOCUS] dir=$direction valid=$valid handler='
+      '${TvFocusController.instance.hasRestoreHandler} '
+      'focus=${focus?.debugLabel ?? "null"} '
+      'candidates=${TvFocusController.collectCandidates(manager.rootScope).length}',
+    );
+    if (!valid) {
+      final ok = TvFocusController.instance.restoreFocusNow();
+      debugPrint('[TVFOCUS] restore=$ok');
+      return true;
     }
-    // 落位成功 -> 吞掉这次按键；失败则放行，交给 Shortcuts 再试。
-    return TvFocusController.instance.restoreFocusNow();
+    if (!TvFocusController.instance.moveFocus(direction, focus)) {
+      TvFocusController.instance.moveFocus(direction, focus, relaxed: true);
+    }
+    TvFocusController.instance.restoreFocusNow();
+    return true;
   }
 
   void _guardPrimaryFocus() {
