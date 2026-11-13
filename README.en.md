@@ -38,11 +38,11 @@
 
 ## 0. What's new & feature overview
 
-### 0.1 What's new in v1.6.0
+### 0.1 What's new in v1.6.1
 
 > Semantic versioning: new features bump the minor version, bug-only fixes bump the patch,
 > and each release gets its **own tag / Release** (`v1.0.0` → `v1.1.0` → `v1.1.1` →
-> `v1.1.2` → `v1.2.0` → `v1.3.0` → `v1.4.0` → `v1.5.0` → `v1.5.1` → **`v1.6.0`**). This lets the in-app update check see new builds via
+> `v1.1.2` → `v1.2.0` → `v1.3.0` → `v1.4.0` → `v1.5.0` → `v1.5.1` → `v1.6.0` → **`v1.6.1`**). This lets the in-app update check see new builds via
 > `/releases/latest` and keeps every build individually rollback-able.
 > **Bug fixes are listed in the Release notes** of the matching version.
 
@@ -68,6 +68,7 @@
 | **v1.5.1 Windows helper** | Added `gdrive-pair-windows-amd64.exe` alongside Linux amd64 / arm64; no phone native app (rationale in `gdrive-pair/README.md`). |
 | **v1.6.0 Bilibili folders** | New "Bilibili folders" section: list the account's fav folders (name / item count, default first), open one to read its videos with load-more. Uses the existing QR login cookies, no packet capture needed. Coexists with the local starred favorites as two separate entries. |
 | **v1.6.0 history constraint** | "History" keeps reading the on-device `BiliLibraryStore`; no Bilibili server-side watch-history API. |
+| **v1.6.1 global D-pad fix** | Two root causes fixed: (1) when focus sits on `rootScope`, `Shortcuts` cannot find `Actions` and arrow keys do nothing while the guard only fires on focus *changes* — a deadlock. Added a global key-level fallback that lands focus on the first visible control, covering artist / statistics / all-songs / Bilibili sections / lyrics settings drawer. (2) The container test (width >= 85% **OR** height >= 80%) wrongly treated full-width list rows as page containers; now only true page containers and tall side rails are excluded. |
 
 **2026-11-12: backport from [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
@@ -139,7 +140,7 @@ and the existing phone behaviour (immersive mode, UI scaling, SAF) is unchanged.
 | Original upstream README | [UPSTREAM_README.md](UPSTREAM_README.md) (preserved verbatim) |
 | **This fork's repository** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | This fork's license | **Apache License 2.0** (same as upstream) |
-| This fork's version | `1.6.0` (see `lib/tv/tv_app_info.dart`) |
+| This fork's version | `1.6.1` (see `lib/tv/tv_app_info.dart`) |
 
 The **full upstream commit history is preserved** (no squash, no history rewrite). All port
 work is recorded as additional commits and tags so it can be rolled back at any time. See
@@ -508,6 +509,7 @@ Full history and anchor tags are preserved:
 | **`v1.5.0`** | **Fixed oversized song/artist title and large-screen inflation; kept one-shot static blur with no new real-time blur; added a Go/Fyne Google Drive pairing helper and restyled phone pairing page** |
 | **`v1.5.1`** | **Actually fixed song/artist title size (A/B verified), added Windows helper, confirmed QR pairing page as the mobile fallback** |
 | **`v1.6.0`** | **Added two-level Bilibili account favorites browsing (coexisting with local starred favorites); history stays local** |
+| **`v1.6.1`** | **Fixed global D-pad deadlock and full-width list rows being misclassified as containers; all main content areas are D-pad reachable again** |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor

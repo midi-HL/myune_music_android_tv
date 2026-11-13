@@ -242,9 +242,27 @@ class TvFocusController {
     if (context == null || !context.mounted) return false;
     final rect = rectOf(focus);
     if (rect == null) return false;
-    final screen = screenSize();
-    return rect.width < screen.width * 0.85 &&
-        rect.height < screen.height * 0.80;
+    return !isPageContainerLike(rect, screenSize());
+  }
+
+  /// 是否「不该作为焦点落点」的布局容器。
+  ///
+  /// 曾用「宽 >= 85% **或** 高 >= 80%」一刀切，结果把全宽但很矮的列表项
+  /// （歌手 / 全部歌曲 / B 站列表，宽约 90%、高约 13%）误判成整页容器：
+  /// `moveFocus` 跳过它们、`isValidFocus` 又把已落上去的焦点拉回，表现为
+  /// 按下键直接跳过整个主内容区，落到下方播放控制栏。
+  ///
+  /// 现在只排除两类真正的容器：
+  ///  * 整页容器：同时占据大部分宽和高（>= 92% / >= 88%）；
+  ///  * 细长侧栏：高 >= 80% 但宽 <= 25%（左侧导航整列）。
+  /// 全宽列表项、抽屉表单行都必须保留。
+  static bool isPageContainerLike(Rect rect, Size screen) {
+    if (rect.width <= 0 || rect.height <= 0) return true;
+    final bool pageLike = rect.width >= screen.width * 0.92 &&
+        rect.height >= screen.height * 0.88;
+    final bool tallRail = rect.height >= screen.height * 0.80 &&
+        rect.width <= screen.width * 0.25;
+    return pageLike || tallRail;
   }
 
   /// 同步保证「当前焦点一定是一个可见控件」。
@@ -297,10 +315,7 @@ class TvFocusController {
     final row = collectCandidates(manager.rootScope).where((c) {
       final context = c.node.context;
       if (context == null || !context.mounted) return false;
-      if (c.rect.width >= screen.width * 0.85 ||
-          c.rect.height >= screen.height * 0.80) {
-        return false;
-      }
+      if (isPageContainerLike(c.rect, screen)) return false;
       try {
         return inScope(context);
       } catch (_) {
@@ -370,14 +385,8 @@ class TvFocusController {
     final screen = screenSize();
     final usable = candidates.where((c) {
       if (c.rect.width <= 0 || c.rect.height <= 0) return false;
-      // 严格排除整页级容器：只按「宽 >= 92% 且 高 >= 88%」过滤太松，
-      // 像 (0,0,960,473)（宽 100%、高 87.6%）这种主内容容器会漏进来，
-      // 恢复焦点时 top=0 排最前被选中，导致焦点落到整屏 FrameLayout，
-      // 表现为「整页无任何高亮、OK 乱触发」。任一维度过大就排除。
-      if (c.rect.width >= screen.width * 0.85 ||
-          c.rect.height >= screen.height * 0.80) {
-        return false;
-      }
+      // 只排除整页容器 / 细长侧栏；全宽但很矮的列表项必须保留。
+      if (isPageContainerLike(c.rect, screen)) return false;
       return true;
     }).toList();
     if (usable.isEmpty) return candidates.first.node;
@@ -437,12 +446,9 @@ class TvFocusController {
         continue;
       }
       if (!candidate.rect.overlaps(scrollReach)) continue;
-      // 跳过整页 / 整列级大容器。旧规则要求「宽 >= 92% 且 高 >= 88%」，
-      // 像左侧栏 (0,0,77,473)（高 87.6%）会漏进来：从控制栏最左按钮按
-      // LEFT 时它被当成「左侧候选」，焦点落到没有高亮的容器上，表现为
-      // 整页突然没有焦点。与 _pickLeaf / isValidFocus 保持同一套阈值。
-      if (candidate.rect.width >= screen.width * 0.85 ||
-          candidate.rect.height >= screen.height * 0.80) {
+      // 只跳过整页容器 / 细长侧栏；全宽列表项（歌手 / B站 / 全部歌曲
+      // 的内容行）必须保留，否则按 DOWN 会跳过整个主内容区。
+      if (isPageContainerLike(candidate.rect, screen)) {
         continue;
       }
       // 跳过完全包住当前控件的祖先容器。
@@ -1013,7 +1019,31 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     // 立刻拉回当前页面。这样 OK 永远不会激活一个用户看不见的按钮 ——
     // 实测这个场景会误触发旧页面的收藏开关。
     FocusManager.instance.addListener(_guardPrimaryFocus);
+    // Shortcuts 是从 primaryFocus.context 向上查找 Actions。焦点一旦落到
+    // rootScope（页面切换、抽屉刚打开且没有 autofocus 控件），rootScope
+    // 没有 context，方向键完全不会触发 TvDirectionalFocusAction；而
+    // _guardPrimaryFocus 只在「焦点发生变化」时触发，rootScope 静止不动
+    // 就形成死锁：按任何方向键都没反应。这里在按键层做一次兜底落焦。
+    HardwareKeyboard.instance.addHandler(_onHardwareKey);
     TvFocusController.instance.scheduleEnsureFocus();
+  }
+
+  /// 方向键兜底：焦点不在可见控件上时，同步把它落到当前页面的第一个可见
+  /// 控件并吞掉本次按键（只落位、不移动）。之后焦点有了 context，Shortcuts
+  /// 与 TvDirectionalFocusAction 恢复正常，第二次按键即可在列表里移动。
+  bool _onHardwareKey(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final key = event.logicalKey;
+    final isArrow = key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight;
+    if (!isArrow) return false;
+    if (TvFocusController.isValidFocus(FocusManager.instance.primaryFocus)) {
+      return false;
+    }
+    // 落位成功 -> 吞掉这次按键；失败则放行，交给 Shortcuts 再试。
+    return TvFocusController.instance.restoreFocusNow();
   }
 
   void _guardPrimaryFocus() {
@@ -1026,6 +1056,7 @@ class _TvFocusScopeState extends State<TvFocusScope> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_onHardwareKey);
     FocusManager.instance.removeListener(_guardPrimaryFocus);
     super.dispose();
   }
