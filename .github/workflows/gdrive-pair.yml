@@ -1,0 +1,70 @@
+name: Build gdrive-pair (Go/Fyne)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'gdrive-pair/**'
+      - '.github/workflows/gdrive-pair.yml'
+  pull_request:
+    paths:
+      - 'gdrive-pair/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Unit tests (pure Go)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: gdrive-pair
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: gdrive-pair/go.sum
+      - name: Check formatting
+        run: |
+          out="$(gofmt -l internal cmd)"
+          if [ -n "$out" ]; then echo "Unformatted files:"; echo "$out"; exit 1; fi
+      - name: Download GUI deps (for module graph)
+        run: go mod tidy
+      - name: Vet pure-Go packages
+        run: go vet ./internal/...
+      - name: Test pure-Go packages
+        run: go test ./internal/... -count=1 -v
+
+  build-linux:
+    name: Linux ${{ matrix.arch }}
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    defaults:
+      run:
+        working-directory: gdrive-pair
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+      - name: Install fyne-cross
+        run: go install github.com/fyne-io/fyne-cross@latest
+      - name: Cross-compile (Docker toolchain, no host CGO needed)
+        run: |
+          go mod tidy
+          fyne-cross linux -arch=${{ matrix.arch }} \
+            -app-id=com.midihl.gdrivepair ./cmd/gdrive-pair
+      - name: List artifacts
+        run: find fyne-cross/bin -type f -maxdepth 3 -printf '%p %s bytes\n'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gdrive-pair-linux-${{ matrix.arch }}
+          path: gdrive-pair/fyne-cross/bin/linux-${{ matrix.arch }}/
+          if-no-files-found: error

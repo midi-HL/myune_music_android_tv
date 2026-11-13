@@ -1,8 +1,8 @@
 // 音频可视化:https://pub.dev/packages/sonix
 
 import 'dart:async';
-import 'dart:io' show Platform;
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -190,17 +190,14 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
   }
 
   void _manageAnimation(bool shouldAnimate) {
-    // Android / TV 弱设备：MeshGradient 只绘制一次，不做逐帧动画。
-    // 10 秒 repeat 动画会让整屏渐变每帧重建，在四核 1+4G 电视上明显掉帧。
-    // 桌面端保留原有的动态背景动画。
-    if (!shouldAnimate || Platform.isAndroid) {
+    if (shouldAnimate) {
+      if (!_animationController.isAnimating) {
+        _animationController.repeat(reverse: true); // 重复播放，反向播放
+      }
+    } else {
       if (_animationController.isAnimating) {
         _animationController.stop();
       }
-      return;
-    }
-    if (!_animationController.isAnimating) {
-      _animationController.repeat(reverse: true);
     }
   }
 
@@ -223,10 +220,7 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
       builder: (context, playlistNotifier, child) {
         final currentSong = playlistNotifier.currentSong;
 
-        // 静态背景不需要封面提色，避免切歌时的异步 CPU 解码 / 取色开销。
-        if (enableDynamicBackground) {
-          _checkAndUpdateColors(currentSong, isDarkTheme);
-        }
+        _checkAndUpdateColors(currentSong, isDarkTheme);
         // 当没有封面图或用户未启用模糊背景时，使用纯色背景
         if (currentSong?.albumArt == null || !useBlurBackground) {
           return Container(
@@ -297,24 +291,41 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
           );
         }
 
-        // 静态背景：按性能优先原则**完全不使用高斯模糊**。
-        // 大半径 ImageFilter.blur 在画面动态时每帧都要重算，四核 1+4G 的
-        // 电视上会明显掉帧。这里只画一层主题色渐变：不解码封面、不做取色、
-        // 不建模糊图层，一次绘制即可，重绘成本接近零。质感不如桌面端可接受。
-        final Color surface = Theme.of(context).colorScheme.surface;
+        // 静态高斯模糊背景：只在封面变化时绘制一次，不参与逐帧重绘。
+        // 用户确认这类一次性模糊在弱电视上不卡，质感需要保留；要避免的是
+        // 把原本不模糊的地方改成实时 / 逐帧高斯模糊。
+        // sigma 按 1/visualScale 补偿，使视觉模糊半径与桌面端一致
+        // （桌面端 visualScale=1.0，行为不变）。
+        final double visual = UiScaleScope.of(context).clamp(0.5, 1.5);
         return Stack(
           fit: StackFit.expand,
           children: [
+            ImageFiltered(
+              imageFilter: ui.ImageFilter.blur(
+                sigmaX: 40 / visual,
+                sigmaY: 40 / visual,
+                tileMode: TileMode.decal,
+              ),
+              child: Image.memory(
+                currentSong!.albumArt!,
+                fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
+                errorBuilder: (context, error, stackTrace) =>
+                    Container(color: Theme.of(context).colorScheme.surface),
+              ),
+            ),
             IgnorePointer(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
                     colors: [
-                      surface,
-                      Color.lerp(surface, Colors.black, 0.12) ?? surface,
+                      Theme.of(
+                        context,
+                      ).colorScheme.surface.withValues(alpha: 0.8),
+                      Theme.of(
+                        context,
+                      ).colorScheme.surface.withValues(alpha: 0.8),
                     ],
                   ),
                 ),

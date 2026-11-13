@@ -421,55 +421,95 @@ class _DrivePairingDialogState extends State<_DrivePairingDialog> {
 const String _page = r'''<!DOCTYPE html>
 <html lang="zh-CN"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>星音 StarNote · Google Drive 配对</title>
 <style>
-:root{color-scheme:dark}
+:root{color-scheme:dark;
+ --bg:#121418;--surface:#1E222A;--surface2:#171A21;--line:#333842;
+ --primary:#8AB4F8;--on:#E6E8EF;--muted:#8A919E}
 *{box-sizing:border-box}
-body{margin:0;padding:24px;background:#12131a;color:#e8e8ee;
- font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-.card{max-width:560px;margin:0 auto;background:#1d1f2a;border-radius:14px;padding:22px}
-h1{font-size:20px;margin:0 0 8px}
-p{color:#a8abbd;font-size:13px;margin:6px 0 14px}
-label{display:block;margin:12px 0 4px;font-size:13px;color:#c9cbd8}
-input,textarea{width:100%;padding:10px;border-radius:8px;border:1px solid #3a3d4d;
- background:#14151d;color:#fff;font:13px monospace}
+body{margin:0;background:var(--bg);color:var(--on);
+ font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+ padding-bottom:32px}
+.appbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+ padding:14px 18px;background:var(--surface2);border-bottom:1px solid var(--line);
+ position:sticky;top:0;z-index:5}
+.brand{font-size:17px;font-weight:700;letter-spacing:.2px}
+.sub{font-size:13px;color:var(--muted)}
+.badge{margin-left:auto;font-size:11px;color:var(--primary);
+ border:1px solid var(--line);border-radius:999px;padding:3px 10px;white-space:nowrap}
+main{max-width:620px;margin:0 auto;padding:18px}
+.steps{display:flex;gap:8px;margin-bottom:16px}
+.step{flex:1;text-align:center;font-size:12px;color:var(--muted);
+ background:var(--surface2);border:1px solid var(--line);border-radius:12px;padding:8px 4px}
+.step.active{color:var(--primary);border-color:var(--primary);background:#1c2433}
+.card{background:var(--surface);border:1px solid var(--line);
+ border-radius:18px;padding:20px;margin-bottom:14px;
+ box-shadow:0 6px 20px rgba(0,0,0,.22)}
+.card.secondary{background:var(--surface2)}
+h1{font-size:19px;margin:0 0 6px}
+h2{font-size:15px;margin:0 0 6px;color:var(--primary)}
+p{color:var(--muted);font-size:13px;margin:6px 0 14px}
+label{display:block;margin:14px 0 5px;font-size:12px;color:#C7CBD6}
+input,textarea{width:100%;padding:11px 12px;border-radius:12px;
+ border:1px solid var(--line);background:var(--surface2);color:#fff;
+ font:13px ui-monospace,SFMono-Regular,Menlo,monospace;outline:none}
+input:focus,textarea:focus{border-color:var(--primary)}
 textarea{resize:vertical}
-button{margin-top:18px;width:100%;padding:12px;border:0;border-radius:9px;
- background:#5b7cfa;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+button{margin-top:20px;width:100%;padding:13px;border:0;border-radius:14px;
+ background:var(--primary);color:#10141c;font-size:15px;font-weight:700;cursor:pointer}
+button:active{transform:translateY(1px)}
 #msg{margin-top:12px;min-height:20px;font-size:13px}
-code{background:#2a2d3a;padding:1px 5px;border-radius:4px}
-.hint{margin-top:18px;font-size:12px}
+code{background:#2a2d3a;padding:1px 5px;border-radius:5px;color:#cdd7f0}
+.hint{margin-top:4px;font-size:12px;line-height:1.7}
 </style></head><body>
-<div class="card">
-<h1>Google Drive 只读配对</h1>
-<p>凭据会<b>直接提交到这台电视</b>（局域网），不经过任何第三方服务。
-应用只请求 <code>drive.readonly</code> 只读权限，不会上传、重命名或删除任何文件。</p>
-<label>名称</label><input id="name" value="我的 Google Drive">
-<label>OAuth client_id *</label><input id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com">
-<label>client_secret（桌面应用类型需要，可留空）</label><input id="clientSecret">
-<label>refresh_token *</label><textarea id="refreshToken" rows="3"></textarea>
-<label>根文件夹 ID（留空 = 我的云端硬盘）</label><input id="rootFolderId">
-<input type="hidden" id="pair" value="__PAIR__">
-<button id="go">提交到电视</button>
-<div id="msg"></div>
-<p class="hint">如何拿 refresh_token：在电脑上跑一次仓库里的
-<code>tools/gdrive_auth.py</code>，浏览器登录 Google 后脚本会自动把凭据推送到本页；
-也可以用 Google OAuth Playground 手动生成后粘贴到上面。</p>
-</div>
+<header class="appbar">
+  <span class="brand">星音 StarNote</span>
+  <span class="sub">Google Drive 配对</span>
+  <span class="badge">只读 · 本机配对</span>
+</header>
+<main>
+  <div class="steps">
+    <div class="step active">1 设置</div>
+    <div class="step">2 授权</div>
+    <div class="step">3 配对</div>
+  </div>
+  <section class="card">
+    <h1>把凭据交给电视</h1>
+    <p>凭据会<b>直接提交到这台电视</b>（局域网），不经过任何第三方服务。
+    应用只请求 <code>drive.readonly</code> 只读权限，不会上传、重命名或删除任何文件。</p>
+    <label>名称</label><input id="name" value="我的 Google Drive">
+    <label>OAuth client_id *</label><input id="clientId" placeholder="xxxxxxxx.apps.googleusercontent.com">
+    <label>client_secret（桌面应用类型需要，可留空）</label><input id="clientSecret">
+    <label>refresh_token *</label><textarea id="refreshToken" rows="3"></textarea>
+    <label>根文件夹 ID（留空 = 我的云端硬盘）</label><input id="rootFolderId">
+    <input type="hidden" id="pair" value="__PAIR__">
+    <button id="go">提交到电视</button>
+    <div id="msg"></div>
+  </section>
+  <section class="card secondary">
+    <h2>怎么拿到 refresh_token</h2>
+    <p class="hint">电脑端推荐用仓库里的 <b>Google Drive 配对助手</b>（Go/Fyne 图形程序）：
+    设置一次 client_id，点「打开浏览器授权」自动完成，再点「与电视配对」即可，
+    本页无需手动填写。<br>
+    只有手机时，可用 <code>tools/gdrive_auth.py</code> 或 Google OAuth Playground
+    生成 refresh_token 后粘贴到上面。<br>
+    注意：Testing 状态签发的 refresh_token <b>7 天过期</b>，到期重新授权一次即可。</p>
+  </section>
+</main>
 <script>
 var msg=document.getElementById('msg');
 document.getElementById('go').onclick=async function(){
   var v=function(id){return document.getElementById(id).value.trim()};
   var body={name:v('name'),clientId:v('clientId'),clientSecret:v('clientSecret'),
     refreshToken:v('refreshToken'),rootFolderId:v('rootFolderId'),pair:v('pair')};
-  if(!body.clientId||!body.refreshToken){msg.textContent='请填写 client_id 与 refresh_token';return}
-  msg.textContent='正在校验凭据…';
+  if(!body.clientId||!body.refreshToken){msg.style.color='#ff9d9d';msg.textContent='请填写 client_id 与 refresh_token';return}
+  msg.style.color='#8AB4F8';msg.textContent='正在校验凭据…';
   try{
     var r=await fetch('/submit',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify(body)});
     var j=await r.json();
-    if(j.ok){msg.style.color='#7ee2a8';msg.textContent='配对成功，请回到电视继续操作'}
+    if(j.ok){msg.style.color='#7ee2a8';msg.textContent='配对成功，请回到电视按「完成」'}
     else{msg.style.color='#ff9d9d';msg.textContent=j.error||'提交失败'}
   }catch(e){msg.style.color='#ff9d9d';msg.textContent='无法连接电视：'+e}
 };
