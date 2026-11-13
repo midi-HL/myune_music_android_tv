@@ -75,18 +75,18 @@ class SettingsProvider with ChangeNotifier {
   static const _panelSurfaceOpacityKey = 'panelSurfaceOpacity'; // 卡片/面板不透明度
 
   int _maxLinesPerLyric = 2;
-  double _fontSize = 22.0; // 默认字体大小
+  double _fontSize = 30.0; // 默认字体大小（与桌面端「歌词显示设置」一致）
   TextAlign _lyricAlignment = TextAlign.center; // 默认居中对齐
   bool _useBlurBackground = true; // 默认启用模糊背景
   bool _useDynamicColor = true; // 默认启用动态颜色
   bool _allowAnyFormat = false; // 默认不允许任何格式
   bool _forceSingleLineLyric = false; // 默认不强制单行显示歌词
   double _lyricVerticalSpacing = 6.0; // 默认歌词垂直间距为6.0
-  int _lyricFontWeight = 500; // 默认歌词字重（100~900），高亮行与非高亮行统一使用
+  int _lyricFontWeight = 550; // 默认歌词字重（与桌面端一致）（100~900），高亮行与非高亮行统一使用
   bool _addLyricPadding = true; // 默认启用歌词上下补位
   bool _minimizeToTray = false; // 默认不启用最小化到托盘
   bool _enableLyricBlur = true; // 默认启用歌词模糊效果
-  double _lyricBlurStrength = 2.5; // 歌词模糊强度，范围 1.0~4.0
+  double _lyricBlurStrength = 4.0; // 歌词模糊强度（与桌面端一致），范围 1.0~4.0
   bool _showAlbumName = false; // 默认不显示专辑名称
   bool _enableDynamicBackground = false; // 默认不启用动态背景
   bool _audioDeviceIsAuto = true; // 默认音频设备为自动
@@ -224,7 +224,7 @@ class SettingsProvider with ChangeNotifier {
   Future<void> _loadFromPrefs() async {
     final prefs = await SharedPreferences.getInstance();
     _maxLinesPerLyric = prefs.getInt(_prefsKey) ?? 2;
-    _fontSize = prefs.getDouble(_fontSizeKey) ?? 20.0;
+    _fontSize = prefs.getDouble(_fontSizeKey) ?? 30.0;
     _androidUiScale = (prefs.getDouble(_androidUiScaleKey) ?? 0.72).clamp(
       0.55,
       1.0,
@@ -238,7 +238,7 @@ class SettingsProvider with ChangeNotifier {
     _enableOnlineLyrics = prefs.getBool(_enableOnlineLyricsKey) ?? false;
     _lyricVerticalSpacing =
         prefs.getDouble(_lyricVerticalSpacingKey) ?? 6.0; // 加载歌词垂直间距设置
-    _lyricFontWeight = (prefs.getInt(_lyricFontWeightKey) ?? 500).clamp(
+    _lyricFontWeight = (prefs.getInt(_lyricFontWeightKey) ?? 550).clamp(
       100,
       900,
     ); // 加载歌词字重设置
@@ -246,7 +246,7 @@ class SettingsProvider with ChangeNotifier {
     _minimizeToTray = prefs.getBool(_minimizeToTrayKey) ?? false; // 加载最小化到托盘设置
     _enableLyricBlur = prefs.getBool(_enableLyricBlurKey) ?? true; // 加载歌词模糊效果设置
     _lyricBlurStrength =
-        prefs.getDouble(_lyricBlurStrengthKey) ?? 2.5; // 加载歌词模糊强度设置
+        prefs.getDouble(_lyricBlurStrengthKey) ?? 4.0; // 加载歌词模糊强度设置
     _primaryLyricSource =
         prefs.getString(_primaryLyricSourceKey) ?? 'qq'; // 加载主要歌词源设置
     _secondaryLyricSource =

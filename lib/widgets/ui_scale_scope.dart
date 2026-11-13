@@ -43,9 +43,12 @@ double playPageScale(BuildContext context) {
   final size = MediaQuery.of(context).size;
   final double width = size.width > 0 ? size.width : 1150.0;
   final double height = size.height > 0 ? size.height : 620.0;
+  // 上限锁 1.0：1080p 电视按面积算会到 ~1.7，把封面 / 标题 / 歌词一起
+  // 放大近 1.7 倍，明显大于桌面端 1150x620 基准（真机对比图里 TV 侧字号
+  // 偏大的主因）。桌面窗口小于基准时仍按面积缩小，大于基准时不再继续放大。
   final double base = (math.sqrt(
     (width * height) / (1150.0 * 620.0),
-  )).clamp(0.5, 2.0);
+  )).clamp(0.5, 1.0);
   final double visual = UiScaleScope.of(context).clamp(0.5, 1.5);
   return (base / visual).clamp(0.5, 3.0);
 }

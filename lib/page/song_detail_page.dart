@@ -1,8 +1,8 @@
 // 音频可视化:https://pub.dev/packages/sonix
 
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -190,14 +190,17 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
   }
 
   void _manageAnimation(bool shouldAnimate) {
-    if (shouldAnimate) {
-      if (!_animationController.isAnimating) {
-        _animationController.repeat(reverse: true); // 重复播放，反向播放
-      }
-    } else {
+    // Android / TV 弱设备：MeshGradient 只绘制一次，不做逐帧动画。
+    // 10 秒 repeat 动画会让整屏渐变每帧重建，在四核 1+4G 电视上明显掉帧。
+    // 桌面端保留原有的动态背景动画。
+    if (!shouldAnimate || Platform.isAndroid) {
       if (_animationController.isAnimating) {
         _animationController.stop();
       }
+      return;
+    }
+    if (!_animationController.isAnimating) {
+      _animationController.repeat(reverse: true);
     }
   }
 
@@ -220,7 +223,10 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
       builder: (context, playlistNotifier, child) {
         final currentSong = playlistNotifier.currentSong;
 
-        _checkAndUpdateColors(currentSong, isDarkTheme);
+        // 静态背景不需要封面提色，避免切歌时的异步 CPU 解码 / 取色开销。
+        if (enableDynamicBackground) {
+          _checkAndUpdateColors(currentSong, isDarkTheme);
+        }
         // 当没有封面图或用户未启用模糊背景时，使用纯色背景
         if (currentSong?.albumArt == null || !useBlurBackground) {
           return Container(
@@ -291,43 +297,24 @@ class _BackgroundBlurWidgetState extends State<BackgroundBlurWidget>
           );
         }
 
-        // 静态高斯模糊背景部分。
-        // Android/TV 的 _AndroidUiScaler 把整棵树布局在放大的虚拟画布上再
-        // Transform.scale 缩回，ImageFilter.blur 的 sigma（逻辑像素）会跟着
-        // 一起缩小，视觉模糊半径只剩桌面端的 visualScale 倍；源封面又被
-        // BoxFit.cover 拉伸到虚拟大画布，Skia 对大 sigma 的降采样优化会让
-        // 背景看起来「分辨率低、糊得不够」。按 1/visualScale 补偿 sigma 使
-        // 视觉半径与桌面端一致，并提高插值质量（桌面端 visualScale=1.0，行为不变）。
-        final double visual = UiScaleScope.of(context).clamp(0.5, 1.5);
+        // 静态背景：按性能优先原则**完全不使用高斯模糊**。
+        // 大半径 ImageFilter.blur 在画面动态时每帧都要重算，四核 1+4G 的
+        // 电视上会明显掉帧。这里只画一层主题色渐变：不解码封面、不做取色、
+        // 不建模糊图层，一次绘制即可，重绘成本接近零。质感不如桌面端可接受。
+        final Color surface = Theme.of(context).colorScheme.surface;
         return Stack(
           fit: StackFit.expand,
           children: [
-            ImageFiltered(
-              imageFilter: ui.ImageFilter.blur(
-                sigmaX: 40 / visual,
-                sigmaY: 40 / visual,
-                tileMode: TileMode.decal,
-              ),
-              child: Image.memory(
-                currentSong!.albumArt!,
-                fit: BoxFit.cover,
-                filterQuality: FilterQuality.high,
-                errorBuilder: (context, error, stackTrace) =>
-                    Container(color: Theme.of(context).colorScheme.surface),
-              ),
-            ),
             IgnorePointer(
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 300),
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                     colors: [
-                      Theme.of(
-                        context,
-                      ).colorScheme.surface.withValues(alpha: 0.8),
-                      Theme.of(
-                        context,
-                      ).colorScheme.surface.withValues(alpha: 0.8),
+                      surface,
+                      Color.lerp(surface, Colors.black, 0.12) ?? surface,
                     ],
                   ),
                 ),
@@ -702,22 +689,19 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                                 baseImageSize,
                                               );
 
-                                              // 根据图片大小计算字体大小。
-                                              // clamp 边界是「视觉像素」常量：在 Android 上必须除以
-                                              // visualScale 转成逻辑像素，否则会被 Transform.scale
-                                              // 缩小，且大屏上 imageSize 被放大后会顶到上限，出现
-                                              // 「歌曲名 / 作曲家比桌面端大」的问题。桌面端
-                                              // visualScale=1.0，公式与上游原版完全一致。
+                                              // 歌曲名 / 作曲家：这是最重要的视觉对齐项。
+                                              // 桌面端 1150x620 基准下 imageSize=310，
+                                              // (310*0.05).clamp(20,32)=20、(310*0.03).clamp(14,28)=14，
+                                              // 实际都落在 clamp 下限 20 / 14。
+                                              // 电视端不再用 imageSize 联动（1080p 上封面被放大后
+                                              // 会把字号顶到 26~32，正是「名字太大」的根因），
+                                              // 改为固定桌面基准 20 / 14「视觉像素」，再按
+                                              // 1/visualScale 转成逻辑像素，视觉恒定与电脑端一致。
+                                              // 桌面端 visualScale=1.0，等价于上游原版。
                                               final double titleFontSize =
-                                                  (imageSize * 0.05).clamp(
-                                                    20.0 / visual,
-                                                    32.0 / visual,
-                                                  );
+                                                  20.0 / visual;
                                               final double artistFontSize =
-                                                  (imageSize * 0.03).clamp(
-                                                    14.0 / visual,
-                                                    28.0 / visual,
-                                                  );
+                                                  14.0 / visual;
 
                                               final borderRadius =
                                                   BorderRadius.circular(12);

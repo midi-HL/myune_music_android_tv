@@ -1073,9 +1073,10 @@ class _LyricsWidgetState extends State<LyricsWidget>
       final size = MediaQuery.of(context).size;
       final double width = size.width > 0 ? size.width : 1150.0;
       final double height = size.height > 0 ? size.height : 620.0;
+      // 上限锁 1.0，避免 1080p 虚拟画布把自适应字号放大到桌面端近两倍。
       final double scale = (math.sqrt(
         (width * height) / (1150.0 * 620.0),
-      )).clamp(0.5, 2.0);
+      )).clamp(0.5, 1.0);
       fontSize = 22.0 * scale / visual;
       lyricVerticalSpacing = 6.0 * scale / visual;
     }
