@@ -66,7 +66,7 @@
 | **v1.5.1 Windows 助手** | 补齐 `gdrive-pair-windows-amd64.exe`，与 Linux amd64 / arm64 一并作为 Release 附件；明确不做手机原生 App（理由见 `gdrive-pair/README.md`） |
 | **v1.6.0 B站收藏夹** | 新增「B站收藏夹」分区：先列账号收藏夹（名称/条目数，默认夹置顶），选中后读该收藏夹视频，可加载更多；只读取 B 站账号收藏列表，需扫码登录（现有登录态即可，无需抓包）。与「本地收藏」星标并存、分两个入口 |
 | **v1.6.0 历史记录约束** | 「历史播放」继续读本机记录（`BiliLibraryStore`），不接 B 站服务端观看历史 API |
-| **v1.6.1 全局 D-pad 焦点修复** | 修两处根因：① 焦点停在 `rootScope` 时 `Shortcuts` 找不到 `Actions`，方向键完全不触发且 guard 只在焦点变化时触发 → 死锁；在全局按键层加方向键兜底落焦，覆盖歌手 / 统计 / 全部歌曲 / B站各分区 / 歌词显示设置抽屉等所有页面。② 容器判定用「宽 >= 85% **或** 高 >= 80%」误杀全宽列表项，改为只排除整页容器 / 细长侧栏，保留全宽列表项 |
+| **v1.6.1 全局 D-pad 焦点修复** | 修四处根因：① 焦点停在 `rootScope` 时 `Shortcuts` 找不到 `Actions`，方向键完全不触发且 guard 只在焦点变化时触发 → 死锁，在全局按键层加方向键兜底落焦；② 容器判定用「宽 >= 85% **或** 高 >= 80%」误杀全宽列表项，改为只排除整页容器 / 细长侧栏；③ 几何评分让 DOWN 跨区跳到侧栏 / 底部播放控制栏，新增 `_NavZone` 上下锁区、左右仍可跨区；④ 页面级 `Shortcuts`/`Actions` 吞掉歌词抽屉方向键，最终统一由全局 `_onHardwareKey` 驱动所有方向键（输入框放行、滑块交给 `handleSliderKey`、其余 `moveFocus(lockZone: true)`）。覆盖歌手 / 统计 / 全部歌曲 / 本地收藏 / 历史播放 / 搜索结果 / 推荐 / B站收藏夹 / 歌词显示设置抽屉等所有主内容区 |
 
 **2026-11-12：反哺 [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
