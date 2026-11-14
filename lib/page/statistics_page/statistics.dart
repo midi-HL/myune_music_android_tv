@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'dart:typed_data';
 import 'package:silky_scroll/silky_scroll.dart';
 import '../../theme/scroll_config.dart';
+import '../../tv/tv_focus_nav.dart';
 
 import '../playlist/playlist_content_notifier.dart';
 import '../setting/settings_provider.dart';
@@ -561,19 +562,26 @@ class _StatisticsState extends State<Statistics> {
     Widget? separator,
   }) {
     final Widget? divider = separator;
+    // 排行榜行原本是裸 ListTile（没有 onTap），Flutter 不会为它创建
+    // Focus 节点，遥控器按 DOWN 在「查看全部」下方找不到任何候选，整页
+    // 统计内容无法用 D-pad 浏览。用 TvFocusHighlight 补一层可聚焦节点并
+    // 给出原生式高亮；焦点移动时 _ensureVisible 会带动外层滚动。
+    Widget focusableRow(BuildContext context, int index) =>
+        TvFocusHighlight(child: itemBuilder(context, index));
+
     final Widget list = divider == null
         ? ListView.builder(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: itemCount,
-            itemBuilder: itemBuilder,
+            itemBuilder: focusableRow,
           )
         : ListView.separated(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: itemCount,
             separatorBuilder: (_, __) => divider,
-            itemBuilder: itemBuilder,
+            itemBuilder: focusableRow,
           );
 
     return Card(
@@ -1017,10 +1025,14 @@ class _RankingDialogState<T> extends State<_RankingDialog<T>> {
                               if (index >= _visibleCount) {
                                 return _buildShowMoreRow();
                               }
-                              return widget.itemBuilder(
-                                context,
-                                items[index],
-                                index,
+                              // 弹窗里的排行榜行同样要可聚焦，否则 D-pad
+                              // 在搜索框下方找不到候选、无法逐行浏览。
+                              return TvFocusHighlight(
+                                child: widget.itemBuilder(
+                                  context,
+                                  items[index],
+                                  index,
+                                ),
                               );
                             },
                           ),

@@ -92,7 +92,8 @@ class _FocusCandidate {
   final Rect rect;
 }
 
-/// 屏幕上的导航区域。上下键锁区，左右键跨区。
+/// 屏幕上的导航区域。rail / content 同属上层（左右并排），bottomBar 是下层。
+/// 上下键采用「同区优先、边界溢出」，左右键允许自由跨区。
 enum _NavZone { rail, content, bottomBar }
 
 /// 设置滑块注册项：TvAdjustableSlider 把自己的 FocusNode 与方向键处理函数
@@ -282,8 +283,9 @@ class TvFocusController {
     return pageLike || tallRail;
   }
 
-  /// 屏幕区域划分（用于上下方向导航锁定）。侧栏在最左 ~77px，底部播放控制栏
-  /// 在最下 ~58px。主内容区就是红线画的那块。用当前控件中心点归类。
+  /// 屏幕区域划分（用于上下方向的「同区优先、边界溢出」）。侧栏在最左
+  /// ~77px，底部播放控制栏在最下 ~58px，主内容区就是红线画的那块。
+  /// 用控件中心点归类；中心点落在底部栏时优先判为 bottomBar。
   static _NavZone zoneOf(Offset center, Size screen) {
     if (center.dy >= screen.height - 62) return _NavZone.bottomBar;
     if (center.dx <= 80) return _NavZone.rail;
@@ -445,16 +447,36 @@ class TvFocusController {
     final candidates = collectCandidates(FocusManager.instance.rootScope);
     final cur = currentRect.center;
     const double epsilon = 2.0;
-    // 上下方向导航锁定在当前区域（侧栏 / 主内容区 / 底部控制栏）内。
-    // 全宽内容行的中心 x 与工具栏按钮差很多，旧评分会让它输给「垂直更近
-    // 但属于侧栏」的小图标，按 DOWN 就跳过整个红线主内容区、落到侧栏或
-    // 底部播放控制栏（用户实测反馈）。左右方向仍允许跨区，保证从侧栏按
-    // RIGHT 能进入主内容区。
+    final bool vertical = direction == TraversalDirection.up ||
+        direction == TraversalDirection.down;
+
+    // 上下方向采用「同区优先、边界溢出」，而不是 v1.6.1 的硬锁区。
+    //  * 第一轮只在当前区域内找候选，保留 v1.6.1 的修复：全宽内容行的
+    //    中心 x 与侧栏小图标差很多，旧评分会让它输给「垂直更近但属于
+    //    侧栏」的图标，按 DOWN 直接跳过整个红线主内容区、落到侧栏或
+    //    底部播放控制栏。
+    //  * 第二轮仅当同区域在该方向上确实没有候选时，才允许沿垂直方向
+    //    溢出到相邻层，恢复遥控器应有的直觉（v1.6.1 硬锁区把区域间的
+    //    自然往返也封死了，实测只能靠左右键绕行）。
+    //  * 左右键不锁区（zone == null），保证从侧栏按 RIGHT 能进主内容区。
     final _NavZone? zone =
-        lockZone && (direction == TraversalDirection.up ||
-                direction == TraversalDirection.down)
-            ? zoneOf(cur, screen)
-            : null;
+        lockZone && vertical ? zoneOf(cur, screen) : null;
+
+    // rail / content 同属上层（左右并排），bottomBar 是下层。垂直溢出只
+    // 允许 上层 --DOWN--> 下层、下层 --UP--> 上层；rail <-> content 是
+    // 左右关系，上下键禁止互跨，否则会重现「按 DOWN 跳到左侧栏」的回归。
+    bool overflowAllowed(_NavZone candidateZone) {
+      if (zone == null) return true;
+      if (direction == TraversalDirection.down) {
+        return zone != _NavZone.bottomBar &&
+            candidateZone == _NavZone.bottomBar;
+      }
+      if (direction == TraversalDirection.up) {
+        return zone == _NavZone.bottomBar &&
+            candidateZone != _NavZone.bottomBar;
+      }
+      return true;
+    }
 
     // 抽屉 / 对话框 / 弹出菜单打开时把焦点锁在该浮层内部；主界面则允许
     // 跨越左侧栏、内容区、底部播放栏等不同的 FocusScope —— 早期版本用
@@ -470,113 +492,124 @@ class TvFocusController {
       screen.height * 2,
     );
 
-    _FocusCandidate? best;
-    double bestScore = double.infinity;
+    // 单次严格几何查找。sameZoneOnly=true 时只看本区域；false 时只看
+    // 允许溢出的相邻层（左右方向 zone==null，两个标志等价，不过滤）。
+    _FocusCandidate? search({required bool sameZoneOnly}) {
+      _FocusCandidate? localBest;
+      double localScore = double.infinity;
 
-    for (final candidate in candidates) {
-      if (candidate.node == current || candidate.node == exclude) continue;
-      if (zone != null &&
-          zoneOf(candidate.rect.center, screen) != zone) {
-        continue;
-      }
-      final layer = _modalLayerOf(candidate.node);
-      if (activeLayer != null) {
-        if (layer != activeLayer) continue;
-      } else if (layer != null) {
-        continue;
-      }
-      if (!candidate.rect.overlaps(scrollReach)) continue;
-      // 只跳过整页容器 / 细长侧栏；全宽列表项（歌手 / B站 / 全部歌曲
-      // 的内容行）必须保留，否则按 DOWN 会跳过整个主内容区。
-      if (isPageContainerLike(candidate.rect, screen)) {
-        continue;
-      }
-      // 跳过完全包住当前控件的祖先容器。
-      if (candidate.rect.contains(cur) &&
-          (candidate.rect.width > currentRect.width + 8 ||
-              candidate.rect.height > currentRect.height + 8)) {
-        continue;
-      }
+      for (final candidate in candidates) {
+        if (candidate.node == current || candidate.node == exclude) continue;
+        if (zone != null) {
+          final candidateZone = zoneOf(candidate.rect.center, screen);
+          final same = candidateZone == zone;
+          if (sameZoneOnly) {
+            if (!same) continue;
+          } else if (same || !overflowAllowed(candidateZone)) {
+            continue;
+          }
+        }
+        final layer = _modalLayerOf(candidate.node);
+        if (activeLayer != null) {
+          if (layer != activeLayer) continue;
+        } else if (layer != null) {
+          continue;
+        }
+        if (!candidate.rect.overlaps(scrollReach)) continue;
+        // 只跳过整页容器 / 细长侧栏；全宽列表项（歌手 / B站 / 全部歌曲
+        // 的内容行）必须保留，否则按 DOWN 会跳过整个主内容区。
+        if (isPageContainerLike(candidate.rect, screen)) {
+          continue;
+        }
+        // 跳过完全包住当前控件的祖先容器。
+        if (candidate.rect.contains(cur) &&
+            (candidate.rect.width > currentRect.width + 8 ||
+                candidate.rect.height > currentRect.height + 8)) {
+          continue;
+        }
 
-      final center = candidate.rect.center;
-      late double primary;
-      late double secondary;
-      switch (direction) {
-        case TraversalDirection.left:
-          if (center.dx >= cur.dx - epsilon) continue;
-          primary = cur.dx - center.dx;
-          secondary = (center.dy - cur.dy).abs();
-          break;
-        case TraversalDirection.right:
-          if (center.dx <= cur.dx + epsilon) continue;
-          primary = center.dx - cur.dx;
-          secondary = (center.dy - cur.dy).abs();
-          break;
-        case TraversalDirection.up:
-          if (center.dy >= cur.dy - epsilon) continue;
-          primary = cur.dy - center.dy;
-          secondary = (center.dx - cur.dx).abs();
-          break;
-        case TraversalDirection.down:
-          if (center.dy <= cur.dy + epsilon) continue;
-          primary = center.dy - cur.dy;
-          secondary = (center.dx - cur.dx).abs();
-          break;
-      }
+        final center = candidate.rect.center;
+        late double primary;
+        late double secondary;
+        switch (direction) {
+          case TraversalDirection.left:
+            if (center.dx >= cur.dx - epsilon) continue;
+            primary = cur.dx - center.dx;
+            secondary = (center.dy - cur.dy).abs();
+            break;
+          case TraversalDirection.right:
+            if (center.dx <= cur.dx + epsilon) continue;
+            primary = center.dx - cur.dx;
+            secondary = (center.dy - cur.dy).abs();
+            break;
+          case TraversalDirection.up:
+            if (center.dy >= cur.dy - epsilon) continue;
+            primary = cur.dy - center.dy;
+            secondary = (center.dx - cur.dx).abs();
+            break;
+          case TraversalDirection.down:
+            if (center.dy <= cur.dy + epsilon) continue;
+            primary = center.dy - cur.dy;
+            secondary = (center.dx - cur.dx).abs();
+            break;
+        }
 
-      // 设置类滑块是横向长条（中心点落在轨道中点），从上方/下方的按钮做
-      // 垂直导航时，中心点的水平差会被放大 3.5 倍，长条因此永远被同列的
-      // 窄按钮挤掉，遥控器根本走不到滑块。仅对这一类候选：垂直方向且当前
-      // 控件水平投影落在轨道范围内时，把副轴偏移按 0 计，让「正上/正下」
-      // 由垂直距离决定，符合视觉直觉；不改动其它控件的评分。
-      if (candidate.node.debugLabel == 'tv-adjustable-slider' &&
-          (direction == TraversalDirection.up ||
-              direction == TraversalDirection.down) &&
-          cur.dx >= candidate.rect.left - epsilon &&
-          cur.dx <= candidate.rect.right + epsilon) {
-        secondary = 0;
-      }
+        // 设置类滑块是横向长条（中心点落在轨道中点），从上方/下方的按钮
+        // 做垂直导航时中心点水平差会被放大 3.5 倍，长条永远被同列窄按钮
+        // 挤掉。仅对这一类候选：垂直方向且当前控件水平投影落在轨道范围
+        // 内时把副轴偏移按 0 计，让「正上/正下」由垂直距离决定。
+        if (candidate.node.debugLabel == 'tv-adjustable-slider' &&
+            vertical &&
+            cur.dx >= candidate.rect.left - epsilon &&
+            cur.dx <= candidate.rect.right + epsilon) {
+          secondary = 0;
+        }
 
-      // 「同一视觉行 / 同一视觉列」优先：
-      // 左右移动时，候选与当前控件在垂直方向要有实质重叠；上下移动时，
-      // 水平方向要有实质重叠。同行 / 同列的相邻控件只用中心点偏移做轻度
-      // 惩罚，跨行 / 跨列的候选额外加权并加固定惩罚，避免从「播放全部」
-      // 向下斜跳到旁侧视频列表、或从工具栏按右跳到另一个页签的控件。
-      // 这是「焦点移动符合界面视觉位置、相邻栏目直觉关系」的核心约束。
-      final bool horizontal =
-          direction == TraversalDirection.left ||
-          direction == TraversalDirection.right;
-      final double overlap = horizontal
-          ? math.min(currentRect.bottom, candidate.rect.bottom) -
-              math.max(currentRect.top, candidate.rect.top)
-          : math.min(currentRect.right, candidate.rect.right) -
-              math.max(currentRect.left, candidate.rect.left);
-      final double axisExtent = horizontal
-          ? math.min(currentRect.height, candidate.rect.height)
-          : math.min(currentRect.width, candidate.rect.width);
-      final bool aligned =
-          axisExtent > 0 && overlap >= axisExtent * 0.5;
-      final double secondaryWeight =
-          relaxed ? 2.0 : (aligned ? 1.2 : 3.5);
-      final double crossPenalty =
-          relaxed || aligned ? 0.0 : axisExtent;
-      final score = primary + secondary * secondaryWeight + crossPenalty;
-      if (score < bestScore) {
-        bestScore = score;
-        best = candidate;
+        // 「同一视觉行 / 同一视觉列」优先：左右移动时垂直方向要有实质
+        // 重叠，上下移动时水平方向要有实质重叠。同行 / 同列的相邻控件
+        // 只用中心点偏移做轻度惩罚，跨行 / 跨列额外加权并加固定惩罚，
+        // 避免从「播放全部」向下斜跳到旁侧列表、或从工具栏按右跳到
+        // 另一个页签的控件。
+        final bool horizontal =
+            direction == TraversalDirection.left ||
+            direction == TraversalDirection.right;
+        final double overlap = horizontal
+            ? math.min(currentRect.bottom, candidate.rect.bottom) -
+                math.max(currentRect.top, candidate.rect.top)
+            : math.min(currentRect.right, candidate.rect.right) -
+                math.max(currentRect.left, candidate.rect.left);
+        final double axisExtent = horizontal
+            ? math.min(currentRect.height, candidate.rect.height)
+            : math.min(currentRect.width, candidate.rect.width);
+        final bool aligned =
+            axisExtent > 0 && overlap >= axisExtent * 0.5;
+        final double secondaryWeight =
+            relaxed ? 2.0 : (aligned ? 1.2 : 3.5);
+        final double crossPenalty =
+            relaxed || aligned ? 0.0 : axisExtent;
+        final score = primary + secondary * secondaryWeight + crossPenalty;
+        if (score < localScore) {
+          localScore = score;
+          localBest = candidate;
+        }
       }
+      return localBest;
     }
 
-    if (best == null) {
-      // 到边界时**什么都不要做**：Flutter 默认就会把焦点留在当前控件。
+    final _FocusCandidate? chosen = zone == null
+        ? search(sameZoneOnly: false)
+        : (search(sameZoneOnly: true) ?? search(sameZoneOnly: false));
+
+    if (chosen == null) {
+      // 到边界时**什么都不要做**：Flutter 默认会把焦点留在当前控件。
       // 曾在这里调用 current.requestFocus() 试图「按回」焦点，但它会触发
-      // FocusManager 通知 ->  guardian/restore 连锁，在控件栏动画期间反而
+      // FocusManager 通知 -> guardian/restore 连锁，在控件栏动画期间反而
       // 把焦点弄丢（真机复现：按 UP 后整页无焦点、后续方向键全部失效）。
       // 静默返回 false，由 Action 末尾的 restoreFocusNow 判断是否需要兜底。
       return false;
     }
-    best.node.requestFocus();
-    _ensureVisible(best.node);
+    chosen.node.requestFocus();
+    _ensureVisible(chosen.node);
     return true;
   }
 
@@ -1083,7 +1116,8 @@ class _TvFocusScopeState extends State<TvFocusScope> {
   /// 给它，抽屉 / 对话框里的焦点不在控制栏，那个 Action 返回 ignored 把
   /// 按键吞掉，抽屉就完全不能用遥控器操作（实测歌词显示设置抽屉 6 帧不动）。
   /// 现在这里接管全部：输入框放行给框架做光标、设置滑块交给滑块处理器、
-  /// 其余走几何导航（上下锁区），并吞掉按键避免页面级 Action 二次驱动。
+  /// 其余走几何导航（上下键同区优先、边界溢出），并吞掉按键避免页面级
+  /// Action 二次驱动。
   bool _onHardwareKey(KeyEvent event) {
     if (event is! KeyDownEvent) return false;
     final direction = _directionOf(event.logicalKey);
@@ -1109,7 +1143,8 @@ class _TvFocusScopeState extends State<TvFocusScope> {
       return true;
     }
 
-    // 4) 几何导航（严格 + relaxed 两次），上下键锁在当前区域内。
+    // 4) 几何导航（严格 + relaxed 两次）。上下键「同区优先、边界溢出」：
+    //    区域内有候选时不跨区，走到边界才允许跨到相邻层。
     if (!TvFocusController.instance.moveFocus(
       direction,
       focus,
