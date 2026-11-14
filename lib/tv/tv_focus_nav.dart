@@ -166,10 +166,7 @@ class TvFocusController {
     final handler = _restoreHandler;
     if (handler != null) {
       try {
-        // handler 可能提前返回 true 却没有真正把焦点落到有效控件
-        // （控件栏隐藏 / 入场动画中）。必须复核 isValidFocus，否则下一次
-        // 方向键继续空转，表现为冷启动后 DOWN/UP 完全没反应。
-        if (handler() && isValidFocus(manager.primaryFocus)) return true;
+        if (handler()) return true;
       } catch (_) {}
     }
     return ensureValidFocus();
@@ -400,10 +397,10 @@ class TvFocusController {
     }
 
     final current = manager.primaryFocus;
-    // 整页容器 / 不可见节点同样是无效焦点：冷启动后焦点常落在整页根节点
-    // 上，若只判断 rootScope 就会误以为「已有焦点」直接返回，之后 DOWN/UP
-    // 一直空转（实测冷启动首键不落焦，而 RIGHT 因为走了别的恢复路径能动）。
-    final invalid = !isValidFocus(current);
+    final invalid = current == null ||
+        current == manager.rootScope ||
+        current.context == null ||
+        !current.context!.mounted;
     if (!invalid && !force) return;
     _pickLeaf(candidates).requestFocus();
   }
@@ -1106,6 +1103,13 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     // 就形成死锁：按任何方向键都没反应。这里在按键层做一次兜底落焦。
     HardwareKeyboard.instance.addHandler(_onHardwareKey);
     TvFocusController.instance.scheduleEnsureFocus();
+    // 冷启动首帧常常还没有任何可聚焦控件，_apply 会因候选为空提前返回，
+    // 焦点就一直停在整页根节点上（实测首键 DOWN/UP 无反应、RIGHT 能动）。
+    // 应用稳定后再做一次幂等落焦：焦点已有效时 ensureValidFocus 不改动，
+    // 不会抢播放页控制栏或用户已经操作的焦点。
+    Future<void>.delayed(const Duration(milliseconds: 600), () {
+      if (mounted) TvFocusController.instance.ensureValidFocus();
+    });
   }
 
   static TraversalDirection? _directionOf(LogicalKeyboardKey key) {
@@ -1141,11 +1145,6 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     if (!valid) {
       // 2) 焦点落空 / 不可见：同步落焦到第一个可见控件，只落位不移动。
       TvFocusController.instance.restoreFocusNow();
-      // 二次保障：页面级 restoreHandler 或动画可能让落焦没有真正生效，
-      // 复核一次并强制用全局可见候选补位，避免整页无高亮的死锁。
-      if (!TvFocusController.isValidFocus(FocusManager.instance.primaryFocus)) {
-        TvFocusController.instance.ensureValidFocus();
-      }
       return true;
     }
 

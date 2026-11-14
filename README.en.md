@@ -38,11 +38,11 @@
 
 ## 0. What's new & feature overview
 
-### 0.1 What's new in v1.6.1
+### 0.1 What's new in v1.7.0
 
 > Semantic versioning: new features bump the minor version, bug-only fixes bump the patch,
 > and each release gets its **own tag / Release** (`v1.0.0` → `v1.1.0` → `v1.1.1` →
-> `v1.1.2` → `v1.2.0` → `v1.3.0` → `v1.4.0` → `v1.5.0` → `v1.5.1` → `v1.6.0` → **`v1.6.1`**). This lets the in-app update check see new builds via
+> `v1.1.2` → `v1.2.0` → `v1.3.0` → `v1.4.0` → `v1.5.0` → `v1.5.1` → `v1.6.0` → `v1.6.1` → **`v1.7.0`**). This lets the in-app update check see new builds via
 > `/releases/latest` and keeps every build individually rollback-able.
 > **Bug fixes are listed in the Release notes** of the matching version.
 
@@ -69,6 +69,7 @@
 | **v1.6.0 Bilibili folders** | New "Bilibili folders" section: list the account's fav folders (name / item count, default first), open one to read its videos with load-more. Uses the existing QR login cookies, no packet capture needed. Coexists with the local starred favorites as two separate entries. |
 | **v1.6.0 history constraint** | "History" keeps reading the on-device `BiliLibraryStore`; no Bilibili server-side watch-history API. |
 | **v1.6.1 global D-pad fix** | Four root causes fixed: (1) when focus sits on `rootScope`, `Shortcuts` cannot find `Actions` and arrow keys do nothing while the guard only fires on focus *changes* — a deadlock, fixed with a global key-level fallback that lands focus on the first visible control; (2) the container test (width >= 85% **OR** height >= 80%) wrongly treated full-width list rows as page containers, now only true page containers and tall side rails are excluded; (3) geometric scoring let DOWN jump across zones to the rail or bottom playback bar, fixed with `_NavZone` (UP/DOWN locked to the current zone, LEFT/RIGHT may still cross); (4) the play page's page-level `Shortcuts`/`Actions` swallowed arrow keys inside the lyrics drawer, so `51e3940` unifies **all** arrow-key handling in the global `_onHardwareKey` (editable focus passes through, sliders go to `handleSliderKey`, everything else uses `moveFocus(lockZone: true)`). Covers artist / statistics / all-songs / local favorites / history / search results / recommendations / Bilibili folders / lyrics settings drawer. |
+| **v1.7.0 zone boundary overflow** | v1.6.1's hard UP/DOWN zone lock also sealed off natural movement between regions. Replaced with two-pass 'same zone first, boundary overflow': content / rail / bottom playbar are reachable with UP/DOWN again while keeping the anti-skip fix. Statistics ranking rows are now focusable so D-pad can browse them. Also fixed cold-start first-key DOWN/UP not landing focus and UP jumping sideways inside the playbar. |
 
 **2026-11-12: backport from [XYkadicloud/myune_music v0.9.5-network.1](https://github.com/XYkadicloud/myune_music/releases/tag/v0.9.5-network.1)**
 
@@ -140,7 +141,7 @@ and the existing phone behaviour (immersive mode, UI scaling, SAF) is unchanged.
 | Original upstream README | [UPSTREAM_README.md](UPSTREAM_README.md) (preserved verbatim) |
 | **This fork's repository** | [github.com/midi-HL/myune_music_android_tv](https://github.com/midi-HL/myune_music_android_tv) |
 | This fork's license | **Apache License 2.0** (same as upstream) |
-| This fork's version | `1.6.1` (see `lib/tv/tv_app_info.dart`) |
+| This fork's version | `1.7.0` (see `lib/tv/tv_app_info.dart`) |
 
 The **full upstream commit history is preserved** (no squash, no history rewrite). All port
 work is recorded as additional commits and tags so it can be rolled back at any time. See
@@ -510,6 +511,7 @@ Full history and anchor tags are preserved:
 | **`v1.5.1`** | **Actually fixed song/artist title size (A/B verified), added Windows helper, confirmed QR pairing page as the mobile fallback** |
 | **`v1.6.0`** | **Added two-level Bilibili account favorites browsing (coexisting with local starred favorites); history stays local** |
 | **`v1.6.1`** | **Fixed global D-pad deadlock and full-width list rows being misclassified as containers; all main content areas are D-pad reachable again** |
+| **`v1.7.0`** | **Fixed UP/DOWN zone boundary overflow, unfocusable statistics ranking rows, cold-start first-key landing, and playbar UP sideways jump (MuMu full-page verification)** |
 
 ```bash
 git checkout tv-v4-focus-fix      # return to an anchor
