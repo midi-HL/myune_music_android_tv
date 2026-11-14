@@ -166,7 +166,10 @@ class TvFocusController {
     final handler = _restoreHandler;
     if (handler != null) {
       try {
-        if (handler()) return true;
+        // handler 可能提前返回 true 却没有真正把焦点落到有效控件
+        // （控件栏隐藏 / 入场动画中）。必须复核 isValidFocus，否则下一次
+        // 方向键继续空转，表现为冷启动后 DOWN/UP 完全没反应。
+        if (handler() && isValidFocus(manager.primaryFocus)) return true;
       } catch (_) {}
     }
     return ensureValidFocus();
@@ -397,10 +400,10 @@ class TvFocusController {
     }
 
     final current = manager.primaryFocus;
-    final invalid = current == null ||
-        current == manager.rootScope ||
-        current.context == null ||
-        !current.context!.mounted;
+    // 整页容器 / 不可见节点同样是无效焦点：冷启动后焦点常落在整页根节点
+    // 上，若只判断 rootScope 就会误以为「已有焦点」直接返回，之后 DOWN/UP
+    // 一直空转（实测冷启动首键不落焦，而 RIGHT 因为走了别的恢复路径能动）。
+    final invalid = !isValidFocus(current);
     if (!invalid && !force) return;
     _pickLeaf(candidates).requestFocus();
   }
@@ -447,6 +450,10 @@ class TvFocusController {
     final candidates = collectCandidates(FocusManager.instance.rootScope);
     final cur = currentRect.center;
     const double epsilon = 2.0;
+    // 垂直方向要求「实质垂直位移」：底部播放栏里的控件中心 y 只差几像素，
+    // 用 epsilon=2 会把同一行左侧的 mini 封面当成「上方候选」，按 UP 就在
+    // 控制栏内部横跳，而不是回到主内容区。左右键仍用 epsilon。
+    const double verticalMinDelta = 12.0;
     final bool vertical = direction == TraversalDirection.up ||
         direction == TraversalDirection.down;
 
@@ -543,12 +550,12 @@ class TvFocusController {
             secondary = (center.dy - cur.dy).abs();
             break;
           case TraversalDirection.up:
-            if (center.dy >= cur.dy - epsilon) continue;
+            if (center.dy >= cur.dy - verticalMinDelta) continue;
             primary = cur.dy - center.dy;
             secondary = (center.dx - cur.dx).abs();
             break;
           case TraversalDirection.down:
-            if (center.dy <= cur.dy + epsilon) continue;
+            if (center.dy <= cur.dy + verticalMinDelta) continue;
             primary = center.dy - cur.dy;
             secondary = (center.dx - cur.dx).abs();
             break;
@@ -1134,6 +1141,11 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     if (!valid) {
       // 2) 焦点落空 / 不可见：同步落焦到第一个可见控件，只落位不移动。
       TvFocusController.instance.restoreFocusNow();
+      // 二次保障：页面级 restoreHandler 或动画可能让落焦没有真正生效，
+      // 复核一次并强制用全局可见候选补位，避免整页无高亮的死锁。
+      if (!TvFocusController.isValidFocus(FocusManager.instance.primaryFocus)) {
+        TvFocusController.instance.ensureValidFocus();
+      }
       return true;
     }
 
