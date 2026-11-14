@@ -487,6 +487,16 @@ class TvFocusController {
     // enclosingScope 硬隔离，导致「红圈 / 绿圈像两个图层、焦点互相过不去」。
     final activeLayer = _activeModalLayer(current, candidates);
 
+    // 播放页有自己的页面级方向键接管（stepWithinScopedRow）：上下键必须
+    // 保持在控制栏那一行。v1.7.0 的边界溢出会把焦点带离控制栏、甚至落到
+    // 整页根节点，破坏 v1.2.0 的「按 UP/DOWN 焦点不丢失」回归。
+    // 抽屉 / 弹窗打开时 activeLayer != null，必须照常导航（v1.6.1 抽屉修复）。
+    if (lockZone && vertical &&
+        TvFocusController.instance.hasRestoreHandler &&
+        activeLayer == null) {
+      return false;
+    }
+
     // 允许焦点落到可滚动内容里暂时被裁切的控件（上下各放宽一屏），
     // 随后用 Scrollable.ensureVisible 把它滚进可视区。
     final scrollReach = Rect.fromLTRB(
@@ -499,6 +509,13 @@ class TvFocusController {
     // 单次严格几何查找。sameZoneOnly=true 时只看本区域；false 时只看
     // 允许溢出的相邻层（左右方向 zone==null，两个标志等价，不过滤）。
     _FocusCandidate? search({required bool sameZoneOnly}) {
+      // 底部播放栏是横条：垂直键只用于离开它，不在栏内做上下查找。
+      // 栏内控件中心 y 只差几像素，否则「下一首」按 UP 会横跳到 mini
+      // 封面，mini 封面按 UP 又因为在同栏内找不到更上方的候选而出不去
+      // （v1.7.0 MuMu 实测）。直接让第一轮落空，走边界溢出回主界面。
+      if (sameZoneOnly && zone == _NavZone.bottomBar && vertical) {
+        return null;
+      }
       _FocusCandidate? localBest;
       double localScore = double.infinity;
 
