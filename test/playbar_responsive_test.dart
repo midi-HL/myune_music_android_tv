@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:mpv_audio_kit/mpv_audio_kit.dart';
+import 'package:mpv_audio_kit/mpv_audio_kit.dart' show Player, PlayerState, PlayerStream;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:myune_music/layout/main_view.dart';
@@ -240,7 +240,7 @@ void main() {
     expect(firstData.hasFlag(SemanticsFlag.isFocused), isTrue);
     expect(firstData.hasFlag(SemanticsFlag.isSelected), isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
-  }, variant: TargetPlatformVariant({TargetPlatform.android}));
+  }, variant: const TargetPlatformVariant({TargetPlatform.android}));
 
   testWidgets('icon-only Android rail exports labelled focused button semantics', (tester) async {
     final node = FocusNode();
