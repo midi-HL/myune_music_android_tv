@@ -222,7 +222,7 @@ void main() {
     addTearDown(settings.dispose);
     addTearDown(playback.dispose);
     addTearDown(navigation.dispose);
-    addTearDown(semantics.dispose);
+    try {
     await tester.pumpWidget(MultiProvider(
       providers: [
         ChangeNotifierProvider<SettingsProvider>.value(value: settings),
@@ -239,6 +239,9 @@ void main() {
     final firstData = tester.getSemantics(first).getSemanticsData();
     expect(firstData.hasFlag(SemanticsFlag.isSelected), isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
+    } finally {
+      semantics.dispose();
+    }
   }, variant: const TargetPlatformVariant({TargetPlatform.android}));
 
   testWidgets('icon-only Android rail exports labelled focused button semantics', (tester) async {
