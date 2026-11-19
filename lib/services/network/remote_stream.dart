@@ -99,6 +99,9 @@ RemoteRangeInfo describeHttpRange({
     total = (contentLength != null && contentLength >= 0) ? contentLength : null;
     servedStart = 0;
     servedEnd = requestedEnd ?? (total != null && total > 0 ? total - 1 : null);
+    if (total != null && total > 0 && servedEnd != null && servedEnd >= total) {
+      servedEnd = total - 1;
+    }
   }
 
   int? limit;

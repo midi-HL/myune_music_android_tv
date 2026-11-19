@@ -386,7 +386,9 @@ class _TvSourceEditorDialogState extends State<_TvSourceEditorDialog> {
     _host = existing?.host ?? '';
     _port = (existing?.port ?? RemoteSource.defaultPort(_type, _useTls))
         .toString();
-    _root = existing?.rootPath ?? '/';
+    _root = existing?.isGoogleDrive == true
+        ? existing!.rootFolderId
+        : existing?.rootPath ?? '/';
     _username = existing?.username ?? '';
     _password = existing?.password ?? '';
   }
@@ -436,6 +438,14 @@ class _TvSourceEditorDialogState extends State<_TvSourceEditorDialog> {
   }
 
   void _save() {
+    final existing = widget.existing;
+    if (existing?.isGoogleDrive == true) {
+      Navigator.of(context).pop(existing!.copyWith(
+        name: _name.trim().isEmpty ? '我的 Google Drive' : _name.trim(),
+        rootFolderId: _root.trim(),
+      ));
+      return;
+    }
     final host = _host.trim();
     final port = int.tryParse(_port.trim());
     if (host.isEmpty) {
@@ -467,6 +477,31 @@ class _TvSourceEditorDialogState extends State<_TvSourceEditorDialog> {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    if (widget.existing?.isGoogleDrive == true) {
+      return AlertDialog(
+        title: const Text('编辑 Google Drive（只读）'),
+        content: SizedBox(
+          width: 480,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TvActionButton(
+              label: '名称', value: _name, autofocus: true,
+              onPressed: () => _edit(title: '名称', current: _name,
+                  onSaved: (value) => _name = value),
+            ),
+            const SizedBox(height: 6),
+            TvActionButton(
+              label: '根文件夹 ID', value: _root.isEmpty ? '我的云端硬盘' : _root,
+              onPressed: () => _edit(title: '根文件夹 ID', current: _root,
+                  hint: '留空 = 我的云端硬盘', onSaved: (value) => _root = value),
+            ),
+          ]),
+        ),
+        actions: [
+          TvActionButton(label: '取消', onPressed: () => Navigator.of(context).pop()),
+          TvActionButton(label: '保存', onPressed: _save),
+        ],
+      );
+    }
     return AlertDialog(
       title: Text(
         widget.existing == null ? '添加网络音乐源' : '编辑网络音乐源',
@@ -920,7 +955,7 @@ class RemoteArtwork extends StatefulWidget {
 
 class _RemoteArtworkState extends State<RemoteArtwork> {
   Uint8List? _bytes;
-  bool _loading = false;
+  int _request = 0;
 
   @override
   void initState() {
@@ -938,25 +973,22 @@ class _RemoteArtworkState extends State<RemoteArtwork> {
   }
 
   Future<void> _load() async {
-    final cached = RemoteMediaRegistry.cachedArtwork(widget.mediaUrl);
+    final url = widget.mediaUrl;
+    final request = ++_request;
+    final cached = RemoteMediaRegistry.cachedArtwork(url);
     if (cached != null && cached.isNotEmpty) {
       if (mounted) setState(() => _bytes = cached);
       return;
     }
-    final song = RemoteMediaRegistry.lookup(widget.mediaUrl);
+    final song = RemoteMediaRegistry.lookup(url);
     if (song?.albumArt != null && song!.albumArt!.isNotEmpty) {
       if (mounted) setState(() => _bytes = song.albumArt);
       return;
     }
-    if (_loading) return;
-    _loading = true;
-    try {
-      final bytes = await RemoteMediaRegistry.artworkFor(widget.mediaUrl);
-      if (mounted && bytes != null && bytes.isNotEmpty) {
-        setState(() => _bytes = bytes);
-      }
-    } finally {
-      _loading = false;
+    final bytes = await RemoteMediaRegistry.artworkFor(url);
+    if (mounted && request == _request && widget.mediaUrl == url &&
+        bytes != null && bytes.isNotEmpty) {
+      setState(() => _bytes = bytes);
     }
   }
 

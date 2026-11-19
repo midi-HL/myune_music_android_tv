@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"context"
+	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -102,11 +103,49 @@ func TestStartLoopbackReceivesCode(t *testing.T) {
 		}
 	}()
 	select {
-	case code := <-ch:
-		if code != "THE_CODE" {
-			t.Fatalf("code = %q", code)
+	case result := <-ch:
+		if result.Err != nil || result.Code != "THE_CODE" {
+			t.Fatalf("result = %+v", result)
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for code")
+	}
+}
+
+func TestNewStateUsesIndependentRandomBytes(t *testing.T) {
+	first, err := NewState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := NewState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bytes, err := hex.DecodeString(first)
+	if err != nil || len(bytes) != 32 || first == second {
+		t.Fatalf("state is not an independent 32-byte value")
+	}
+}
+
+func TestStartLoopbackReportsDeniedAuthorization(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	ch, stop, err := StartLoopback(ctx, "DENIED_STATE")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stop()
+	response, err := http.Get(RedirectURI + "?state=DENIED_STATE&error=access_denied")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	select {
+	case result := <-ch:
+		if result.Err == nil || !strings.Contains(result.Err.Error(), "access_denied") || result.Code != "" {
+			t.Fatalf("unexpected result: %+v", result)
+		}
+	case <-ctx.Done():
+		t.Fatal("denied callback waited until timeout")
 	}
 }

@@ -2,7 +2,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 
-import '../../tv/tv_device.dart';
 import '../../tv/tv_settings_tab.dart';
 import 'tabs/general_tab.dart';
 import 'tabs/personalization_tab.dart';
@@ -79,7 +78,7 @@ class _SettingPageState extends State<SettingPage> {
                 onTap: () => setState(() => _selectedIndex = 5),
               ),
               // TV 专属设置：手柄图标、10-foot 画面、按键学习与键位速查。
-              if (TvDevice.isTv)
+              if (Platform.isAndroid)
                 _SettingNavItem(
                   index: 6,
                   title: '电视与输入',

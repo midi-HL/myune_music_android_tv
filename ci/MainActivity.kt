@@ -181,7 +181,7 @@ class MainActivity : FlutterActivity() {
         )
         val seen = HashSet<String>()
         var visited = 0
-        while (queue.isNotEmpty() && visited < 20000) {
+        while (queue.isNotEmpty()) {
             val childrenUri = queue.removeFirst()
             val cursor = contentResolver.query(
                 childrenUri,
@@ -194,11 +194,15 @@ class MainActivity : FlutterActivity() {
                 null,
                 null,
                 null,
-            ) ?: continue
+            ) ?: throw IllegalStateException("Directory provider returned no cursor")
             cursor.use { c ->
-                while (c.moveToNext() && visited < 20000) {
+                while (c.moveToNext()) {
                     visited++
-                    val docId = getString(c, DocumentsContract.Document.COLUMN_DOCUMENT_ID) ?: continue
+                    if (visited > 20000) {
+                        throw IllegalStateException("Directory scan exceeded 20000 entries; existing playlist was kept")
+                    }
+                    val docId = getString(c, DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                        ?: throw IllegalStateException("Directory provider omitted document ID")
                     val name = getString(c, DocumentsContract.Document.COLUMN_DISPLAY_NAME) ?: docId
                     val mime = getString(c, DocumentsContract.Document.COLUMN_MIME_TYPE) ?: ""
                     val modified = getLong(c, DocumentsContract.Document.COLUMN_LAST_MODIFIED) ?: 0L

@@ -231,7 +231,11 @@ func (u *ui) startBrowserAuth() {
 		u.show("settings")
 		return
 	}
-	state := oauth.NewState()
+	state, err := oauth.NewState()
+	if err != nil {
+		u.showErr(err)
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	ch, stop, err := oauth.StartLoopback(ctx, state)
 	if err != nil {
@@ -253,8 +257,12 @@ func (u *ui) startBrowserAuth() {
 		defer cancel()
 		defer stop()
 		select {
-		case code := <-ch:
-			u.exchange(code)
+		case result := <-ch:
+			if result.Err != nil {
+				u.showErr(result.Err)
+				return
+			}
+			u.exchange(result.Code)
 		case <-ctx.Done():
 			u.log("等待授权超时，请重试或用「直接输入授权码」")
 		}

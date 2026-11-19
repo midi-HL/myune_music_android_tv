@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/painting.dart' show MatrixUtils;
 import 'package:flutter/services.dart';
 
 // Android TV 焦点导航层。
@@ -49,7 +50,12 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
 
     // 输入框的方向键由 EditableText 自己的 Shortcuts 处理光标移动，
     // 这里必须明确放行，返回 null 会被 Shortcuts 当成 handled 吞掉按键。
-    if (_isEditableFocus(node)) return KeyEventResult.ignored;
+    final vertical = intent.direction == TraversalDirection.up ||
+        intent.direction == TraversalDirection.down;
+    if (_isEditableFocus(node) &&
+        !(vertical && TvFocusController.isSingleLineEditableFocus(node))) {
+      return KeyEventResult.ignored;
+    }
 
     // 设置类滑块优先：TvDirectionalFocusAction 是每次方向键必然触发的唯一
     // 入口（焦点移动本就由它驱动）。按注册的滑块 FocusNode / rect 匹配，
@@ -157,11 +163,46 @@ class TvFocusController {
     return found;
   }
 
+  static bool isSingleLineEditableFocus(FocusNode? node) {
+    final context = node?.context;
+    if (context == null) return false;
+    EditableText? editable;
+    if (context.widget is EditableText) {
+      editable = context.widget as EditableText;
+    } else {
+      context.visitAncestorElements((element) {
+        final widget = element.widget;
+        if (widget is EditableText) {
+          editable = widget;
+          return false;
+        }
+        return true;
+      });
+    }
+    return editable?.maxLines == 1;
+  }
+
   /// 同步恢复焦点：焦点本来就有效时**不要动它**（否则会覆盖 moveFocus
   /// 刚完成的移动，方向键就永远跳回第一个按钮）；只有真的落空 / 不可见时，
   /// 才用当前页面注册的目标拉回，失败再退回全局可见候选。
   bool restoreFocusNow() {
     final manager = FocusManager.instance;
+    final candidates = collectCandidates(manager.rootScope);
+    final layer = _activeModalLayer(
+      manager.primaryFocus ?? manager.rootScope,
+      candidates,
+    );
+    if (layer != null &&
+        (!isValidFocus(manager.primaryFocus) ||
+            _modalLayerOf(manager.primaryFocus!) != layer)) {
+      final inLayer = candidates
+          .where((candidate) => _modalLayerOf(candidate.node) == layer)
+          .toList();
+      if (inLayer.isNotEmpty) {
+        _pickLeaf(inLayer).requestFocus();
+        return true;
+      }
+    }
     if (isValidFocus(manager.primaryFocus)) return true;
     final handler = _restoreHandler;
     if (handler != null) {
@@ -640,6 +681,8 @@ class TvFocusController {
   static Object? _modalLayerOf(FocusNode node) {
     final context = node.context;
     if (context == null || !context.mounted) return null;
+    final overlay = context.findAncestorWidgetOfExactType<TvFocusLayer>();
+    if (overlay != null) return overlay;
     final drawer = context.findAncestorWidgetOfExactType<Drawer>();
     if (drawer != null) return drawer;
     final route = ModalRoute.of(context);
@@ -735,16 +778,28 @@ class TvFocusController {
     final route = ModalRoute.of(context);
     if (route != null && !route.isCurrent) return null;
     // 2) Offstage / Visibility(visible:false) 的整棵子树。
-    final offstage = context.findAncestorWidgetOfExactType<Offstage>();
-    if (offstage != null && offstage.offstage) return null;
-    final visibility = context.findAncestorWidgetOfExactType<Visibility>();
-    if (visibility != null && !visibility.visible) return null;
+    var hidden = false;
+    context.visitAncestorElements((element) {
+      final widget = element.widget;
+      if ((widget is Offstage && widget.offstage) ||
+          (widget is Visibility && !widget.visible)) {
+        hidden = true;
+        return false;
+      }
+      return true;
+    });
+    if (hidden) return null;
 
     final object = context.findRenderObject();
     if (object is! RenderBox || !object.attached || !object.hasSize) {
       return null;
     }
-    return object.localToGlobal(Offset.zero) & object.size;
+    // origin 和尺寸必须一起变换；只变换 origin 会把缩放前尺寸用于全局评分。
+    final rect = MatrixUtils.transformRect(
+      object.getTransformTo(null),
+      Offset.zero & object.size,
+    );
+    return rect.isFinite && !rect.isEmpty ? rect : null;
   }
 
   static Size screenSize() {
@@ -761,14 +816,17 @@ class TvFocusNavigatorObserver extends NavigatorObserver {
   // canPop:false 空操作：maybePop() 被 PopScope 拦截时会返回 true 却不触发
   // didPop，只有本计数增加才说明对话框 / 播放页真的出栈了。
   static int popCount = 0;
+  static Route<dynamic>? currentRoute;
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    currentRoute = route;
     TvFocusController.instance.scheduleFocusForRoute(route);
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    currentRoute = previousRoute;
     popCount++;
     if (previousRoute != null) {
       TvFocusController.instance.scheduleFocusForRoute(previousRoute);
@@ -776,6 +834,19 @@ class TvFocusNavigatorObserver extends NavigatorObserver {
       TvFocusController.instance.scheduleEnsureFocus();
     }
   }
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    if (currentRoute == oldRoute) currentRoute = newRoute;
+  }
+}
+
+/// OverlayEntry 不属于 PopupRoute，用显式层标识隔离其方向键候选。
+class TvFocusLayer extends InheritedWidget {
+  const TvFocusLayer({required super.child, super.key});
+
+  @override
+  bool updateShouldNotify(TvFocusLayer oldWidget) => false;
 }
 
 // 非 Navigator route 的浮层（音量竖条等）用这个栈登记关闭回调，
@@ -1154,7 +1225,13 @@ class _TvFocusScopeState extends State<TvFocusScope> {
     final manager = FocusManager.instance;
     final focus = manager.primaryFocus;
     // 1) 输入框方向键交给框架做光标移动，不能吞。
-    if (TvFocusController.isEditableFocus(focus)) return false;
+    if (TvFocusController.isEditableFocus(focus)) {
+      final vertical = direction == TraversalDirection.up ||
+          direction == TraversalDirection.down;
+      if (!vertical || !TvFocusController.isSingleLineEditableFocus(focus)) {
+        return false;
+      }
+    }
 
     final valid = focus != null &&
         focus != manager.rootScope &&

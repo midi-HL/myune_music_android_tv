@@ -22,6 +22,19 @@ import 'webdav_client.dart';
 class NetworkMediaService {
   NetworkMediaService._();
 
+  /// Normal row activation only includes visible audio. Enqueue activates one
+  /// row; the explicit play-all menu is the only path that includes videos.
+  static ({List<RemoteEntry> entries, int index}) directoryPlayback(
+    Iterable<RemoteEntry> entries, RemoteEntry selected, {required bool enqueue}
+  ) {
+    final audio = entries.where((entry) => entry.isAudio).toList();
+    final index = audio.indexWhere((entry) => entry.path == selected.path);
+    if (index < 0) return (entries: <RemoteEntry>[], index: -1);
+    return enqueue
+        ? (entries: <RemoteEntry>[audio[index]], index: 0)
+        : (entries: audio, index: index);
+  }
+
   /// main() 里调用。代理启动失败不应阻断应用其它功能，因此吞掉异常，
   /// 页面用到代理时再给出可读提示。
   static Future<void> initialize() async {

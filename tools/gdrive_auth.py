@@ -67,6 +67,7 @@ REDIRECT_URI = f"http://127.0.0.1:{PORT}/"
 class _Handler(http.server.BaseHTTPRequestHandler):
     result = None  # type: dict | None
     state = ""
+    completed = threading.Event()
 
     def do_GET(self):  # noqa: N802
         query = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
@@ -74,6 +75,8 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._reply(400, "state 校验失败")
             return
         if "error" in query:
+            _Handler.result = {"error": query["error"][0]}
+            _Handler.completed.set()
             self._reply(400, "授权被拒绝：" + query["error"][0])
             return
         code = query.get("code", [""])[0]
@@ -81,6 +84,7 @@ class _Handler(http.server.BaseHTTPRequestHandler):
             self._reply(400, "未收到授权码")
             return
         _Handler.result = {"code": code}
+        _Handler.completed.set()
         self._reply(200, "授权完成，可以关闭本页，回到命令行。")
 
     def _reply(self, status, text):
@@ -94,6 +98,24 @@ class _Handler(http.server.BaseHTTPRequestHandler):
 
     def log_message(self, *_args):
         pass
+
+
+def _wait_for_authorization(server, timeout=300):
+    """Use one request loop and one total deadline for the browser callback."""
+    _Handler.result = None
+    _Handler.completed.clear()
+    thread = threading.Thread(
+        target=lambda: server.serve_forever(poll_interval=0.05), daemon=True
+    )
+    thread.start()
+    try:
+        if not _Handler.completed.wait(timeout):
+            raise TimeoutError("等待 Google 授权超时，请重新运行授权助手")
+        return _Handler.result
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def _exchange(code, client_id, client_secret):
@@ -151,8 +173,6 @@ def main():
     _Handler.result = None
     _Handler.state = secrets.token_urlsafe(16)
     server = http.server.HTTPServer(("127.0.0.1", PORT), _Handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
 
     params = {
         "client_id": args.client_id,
@@ -169,14 +189,12 @@ def main():
     webbrowser.open(url)
 
     print("等待授权回调（最多 5 分钟）…")
-    server.timeout = 300
-    while _Handler.result is None:
-        server.handle_request()
-    server.shutdown()
-
-    result = _Handler.result
+    try:
+        result = _wait_for_authorization(server)
+    except TimeoutError as exc:
+        raise SystemExit(str(exc)) from exc
     if "code" not in result:
-        raise SystemExit("授权未完成")
+        raise SystemExit("授权未完成：" + result.get("error", "未知错误"))
 
     print("正在换取 refresh_token…")
     tokens = _exchange(result["code"], args.client_id, args.client_secret)

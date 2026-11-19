@@ -19,6 +19,9 @@ enum TvAction {
   openAllSongs,
   openSettings,
   back,
+  play,
+  pause,
+  stop,
 }
 
 const Map<TvAction, String> tvActionLabels = <TvAction, String>{
@@ -37,6 +40,9 @@ const Map<TvAction, String> tvActionLabels = <TvAction, String>{
   TvAction.openAllSongs: '打开全部歌曲',
   TvAction.openSettings: '打开设置',
   TvAction.back: '返回',
+  TvAction.play: '播放',
+  TvAction.pause: '暂停',
+  TvAction.stop: '停止',
 };
 
 TvAction tvActionFromName(String? name) {

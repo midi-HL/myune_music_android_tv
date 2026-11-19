@@ -132,9 +132,9 @@ class AndroidKeyCode {
 
 final Map<int, TvAction> _mediaKeys = <int, TvAction>{
   AndroidKeyCode.mediaPlayPause: TvAction.playPause,
-  AndroidKeyCode.mediaPlay: TvAction.playPause,
-  AndroidKeyCode.mediaPause: TvAction.playPause,
-  AndroidKeyCode.mediaStop: TvAction.playPause,
+  AndroidKeyCode.mediaPlay: TvAction.play,
+  AndroidKeyCode.mediaPause: TvAction.pause,
+  AndroidKeyCode.mediaStop: TvAction.stop,
   AndroidKeyCode.mediaNext: TvAction.nextTrack,
   AndroidKeyCode.mediaPrevious: TvAction.previousTrack,
   AndroidKeyCode.mediaRewind: TvAction.seekBackward,
@@ -289,6 +289,7 @@ class TvKeyMaps {
     AndroidKeyCode.mediaPlayPause: '媒体播放/暂停',
     AndroidKeyCode.mediaPlay: '媒体播放',
     AndroidKeyCode.mediaPause: '媒体暂停',
+    AndroidKeyCode.mediaStop: '媒体停止',
     AndroidKeyCode.mediaNext: '媒体下一首',
     AndroidKeyCode.mediaPrevious: '媒体上一首',
     AndroidKeyCode.mediaRewind: '媒体快退',

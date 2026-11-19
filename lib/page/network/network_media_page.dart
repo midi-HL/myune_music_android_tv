@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../tv/tv_focus_nav.dart';
+import '../../tv/tv_navigation.dart';
 import 'bilibili_view.dart';
 import 'network_sources_view.dart';
 import 'tv_network_widgets.dart';
@@ -16,6 +17,27 @@ class NetworkMediaPage extends StatefulWidget {
 
 class _NetworkMediaPageState extends State<NetworkMediaPage> {
   int _tab = 0;
+  final _sourcesKey = GlobalKey<NetworkSourcesViewState>();
+  final _biliKey = GlobalKey<BilibiliViewState>();
+  late final bool Function() _backHandler;
+
+  @override
+  void initState() {
+    super.initState();
+    _backHandler = () {
+      if (!mounted) return false;
+      return _tab == 0
+          ? (_sourcesKey.currentState?.tryGoBack() ?? false)
+          : (_biliKey.currentState?.tryGoBack() ?? false);
+    };
+    TvBackHandler.registerPageHandler('/network', _backHandler);
+  }
+
+  @override
+  void dispose() {
+    TvBackHandler.unregisterPageHandler('/network', _backHandler);
+    super.dispose();
+  }
 
   void _switchTab(int tab) {
     if (tab == _tab) return;
@@ -79,11 +101,11 @@ class _NetworkMediaPageState extends State<NetworkMediaPage> {
             children: <Widget>[
               ExcludeFocus(
                 excluding: _tab != 0,
-                child: const NetworkSourcesView(),
+                child: NetworkSourcesView(key: _sourcesKey),
               ),
               ExcludeFocus(
                 excluding: _tab != 1,
-                child: const BilibiliView(),
+                child: BilibiliView(key: _biliKey),
               ),
             ],
           ),

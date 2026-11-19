@@ -1,13 +1,18 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:myune_music/main.dart';
-import 'package:myune_music/src/rust/frb_generated.dart';
 import 'package:integration_test/integration_test.dart';
+import 'package:myune_music/layout/app_shell.dart';
+import 'package:myune_music/main.dart' as app;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-  setUpAll(() async => await RustLib.init());
-  testWidgets('Can call rust function', (WidgetTester tester) async {
-    await tester.pumpWidget(const MyApp());
-    expect(find.textContaining('Result: `Hello, Tom!`'), findsOneWidget);
+
+  testWidgets('Application starts with its native services and providers',
+      (tester) async {
+    await app.main();
+    // Player backgrounds can animate continuously; use a bounded wait.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 2));
+    expect(find.byType(AppShell), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 }

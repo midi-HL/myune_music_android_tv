@@ -91,6 +91,8 @@ class AudioService {
     required List<double> eqGains,
     required List<int> eqFrequencies,
     bool exclusiveMode = false,
+    bool Function()? shouldContinue,
+    bool Function()? shouldPlay,
   }) async {
     try {
       await _player.setAudioExclusive(exclusiveMode);
@@ -98,16 +100,20 @@ class AudioService {
       //
     }
 
+    if (shouldContinue?.call() == false) return;
     await setPitch(pitch);
+    if (shouldContinue?.call() == false) return;
     await setRate(rate);
+    if (shouldContinue?.call() == false) return;
     await applyEqualizer(gains: eqGains, frequencies: eqFrequencies);
+    if (shouldContinue?.call() == false) return;
 
     // 网络媒体的 URL 里编码了本机代理端口。应用重启后代理可能顺延到另一个
     // 端口，恢复的播放队列 / 历史里保存的仍是旧 URL；交给 mpv 前统一改写，
     // 避免连不上旧端口报 loading failed。本地路径原样返回，零开销。
     await _player.open(
       Media(RemoteMediaRegistry.normalizePlayablePath(filePath)),
-      play: true,
+      play: shouldPlay?.call() ?? true,
     );
   }
 
@@ -140,6 +146,8 @@ class AudioService {
     required List<double> eqGains,
     required List<int> eqFrequencies,
     bool exclusiveMode = false,
+    bool Function()? shouldContinue,
+    bool Function()? shouldPlay,
   }) async {
     try {
       await _player.setAudioExclusive(exclusiveMode);
@@ -147,9 +155,13 @@ class AudioService {
       //
     }
 
+    if (shouldContinue?.call() == false) return;
     await setPitch(pitch);
+    if (shouldContinue?.call() == false) return;
     await setRate(rate);
+    if (shouldContinue?.call() == false) return;
     await applyEqualizer(gains: eqGains, frequencies: eqFrequencies);
+    if (shouldContinue?.call() == false) return;
 
     final tracks = <Media>[
       Media(RemoteMediaRegistry.normalizePlayablePath(currentPath)),
@@ -159,7 +171,7 @@ class AudioService {
         Media(RemoteMediaRegistry.normalizePlayablePath(nextPath)),
       );
     }
-    await _player.openAll(tracks, play: true);
+    await _player.openAll(tracks, play: shouldPlay?.call() ?? true);
   }
 
   // 替换 mpv playlist 中的预备项（index 1）

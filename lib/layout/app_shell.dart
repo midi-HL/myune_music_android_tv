@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
+import 'dart:io';
 
-import '../tv/tv_device.dart';
 import '../tv/tv_navigation.dart';
 import '../widgets/app_window_title_bar.dart';
 import '../widgets/custom_background_layer.dart';
@@ -40,9 +40,8 @@ class AppShell extends StatelessWidget {
       ),
     );
 
-    // TV 上统一接管系统返回键：先逐级关闭抽屉 / 对话框 / 播放页，
-    // 主界面再返回电视桌面。手机端行为完全不变。
-    if (!TvDevice.isTv) return scaffold;
+    // 普通 Android 电视盒子也需要逐级返回，不能直接退出当前目录。
+    if (!Platform.isAndroid) return scaffold;
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (bool didPop, Object? result) {

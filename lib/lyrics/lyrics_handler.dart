@@ -35,6 +35,7 @@ class LyricsHandler {
   final NotificationService _notificationService;
   final VoidCallback _notifyListeners;
   final Song? Function() _getCurrentSong;
+  final Future<Uint8List> Function(File) _readExternalBytes;
 
   final NeteaseFetcher _neteaseFetcher = NeteaseFetcher();
   final KugouFetcher _kugouFetcher = KugouFetcher();
@@ -44,6 +45,13 @@ class LyricsHandler {
   final KrcParser _krcParser = KrcParser();
   final QrcParser _qrcParser = QrcParser();
   final YrcParser _yrcParser = YrcParser();
+
+  int _lyricRevision = 0;
+  bool _disposed = false;
+
+  bool _isCurrent(int request, String path) => !_disposed &&
+      request == _lyricRevision &&
+      (_getCurrentSong() == null || _getCurrentSong()?.filePath == path);
 
   List<LyricLine> _currentLyrics = [];
   int _currentLyricLineIndex = -1;
@@ -59,16 +67,22 @@ class LyricsHandler {
     required NotificationService notificationService,
     required VoidCallback notifyListeners,
     required Song? Function() getCurrentSong,
+    Future<Uint8List> Function(File)? readExternalBytes,
   }) : _settingsProvider = settingsProvider,
        _notificationService = notificationService,
        _notifyListeners = notifyListeners,
-       _getCurrentSong = getCurrentSong;
+       _getCurrentSong = getCurrentSong,
+       _readExternalBytes = readExternalBytes ?? _defaultReadExternalBytes;
+
+  static Future<Uint8List> _defaultReadExternalBytes(File file) => file.readAsBytes();
 
   List<LyricLine> get currentLyrics => _currentLyrics;
   int get currentLyricLineIndex => _currentLyricLineIndex;
   Stream<int> get lyricLineIndexStream => _lyricLineIndexController.stream;
 
   void clearLyrics() {
+    if (_disposed) return;
+    _lyricRevision++;
     _releaseLockedLyricLine();
     _currentLyrics = [];
     _currentLyricLineIndex = -1;
@@ -77,6 +91,8 @@ class LyricsHandler {
   }
 
   void dispose() {
+    _disposed = true;
+    _lyricRevision++;
     _releaseLockedLyricLine();
     _lyricLineIndexController.close();
   }
@@ -109,6 +125,8 @@ class LyricsHandler {
 
   // 加载指定歌曲的歌词
   Future<void> loadLyricsForSong(String songFilePath) async {
+    if (_disposed) return;
+    final request = ++_lyricRevision;
     _releaseLockedLyricLine();
     _currentLyrics = []; // 清空之前的歌词
     _currentLyricLineIndex = -1; // 重置歌词行索引
@@ -125,7 +143,7 @@ class LyricsHandler {
     // 只保留在线歌词（若用户启用），彻底消除误报。
     if (RemoteMediaRegistry.isNetwork(songFilePath)) {
       if (song != null) {
-        unawaited(_loadNetworkLyricsPipeline(song, songFilePath));
+        unawaited(_loadNetworkLyricsPipeline(song, songFilePath, request));
       } else if (_settingsProvider.enableOnlineLyrics) {
         // 拿不到 Song 时保守回退到在线歌词，避免直接空歌词。
         unawaited(
@@ -136,7 +154,7 @@ class LyricsHandler {
               album: '网络媒体',
               filePath: songFilePath,
             ),
-            songFilePath,
+            songFilePath, request,
           ),
         );
       }
@@ -146,20 +164,20 @@ class LyricsHandler {
     // 按用户设置的优先级依次尝试各个歌词来源
     for (var i = 0; i < order.length; i++) {
       // 加载过程中切歌则放弃，避免把上一首的歌词贴到新歌上
-      if (song != null && _getCurrentSong()?.filePath != song.filePath) return;
+      if (!_isCurrent(request, songFilePath)) return;
 
       final source = LyricSource.fromId(order[i]);
       if (source == null) continue;
 
       switch (source) {
         case LyricSource.embedded:
-          await _loadEmbeddedLyrics(songFilePath);
+          await _loadEmbeddedLyrics(songFilePath, request);
           break;
         case LyricSource.externalLrc:
         case LyricSource.externalKrc:
         case LyricSource.externalQrc:
         case LyricSource.externalYrc:
-          await _loadExternalLyrics(songFilePath, source);
+          await _loadExternalLyrics(songFilePath, source, request);
           break;
         case LyricSource.online:
           if (!_settingsProvider.enableOnlineLyrics || song == null) break;
@@ -169,7 +187,8 @@ class LyricsHandler {
             unawaited(
               _loadOnlineLyricsPipeline(
                 song,
-                preferredSource: _preferredOnlineSource(),
+                request: request,
+        preferredSource: _preferredOnlineSource(),
               ),
             );
             return;
@@ -178,14 +197,17 @@ class LyricsHandler {
           // 排在中间时必须等出结果，否则无法判断是否继续尝试后面的来源
           await _loadOnlineLyricsPipeline(
             song,
-            preferredSource: _preferredOnlineSource(),
+            request: request,
+        preferredSource: _preferredOnlineSource(),
           );
           break;
       }
 
+      if (!_isCurrent(request, songFilePath)) return;
       if (_currentLyrics.isNotEmpty) return;
     }
 
+    if (!_isCurrent(request, songFilePath)) return;
     // 所有来源都没有歌词
     _currentLyrics = [];
     _notifyListeners();
@@ -202,6 +224,8 @@ class LyricsHandler {
     LyricSource source, {
     bool refreshOnline = false,
   }) async {
+    if (_disposed) return;
+    final request = ++_lyricRevision;
     final song = _getCurrentSong();
     if (song == null) return;
     final path = song.filePath;
@@ -216,6 +240,7 @@ class LyricsHandler {
     if (source == LyricSource.online || refreshOnline) {
       await _loadOnlineLyricsPipeline(
         song,
+        request: request,
         preferredSource: _preferredOnlineSource(),
       );
       return;
@@ -224,22 +249,22 @@ class LyricsHandler {
     // 网络媒体（WebDAV / FTP / 哔哩哔哩 / Google Drive）没有本地文件路径，
     // 本地来源只能走在线兜底；顺带沿用网络字幕链路的既有行为。
     if (RemoteMediaRegistry.isNetwork(path)) {
-      unawaited(_loadNetworkLyricsPipeline(song, path));
+      unawaited(_loadNetworkLyricsPipeline(song, path, request));
       return;
     }
 
     if (source == LyricSource.embedded) {
-      await _loadEmbeddedLyrics(path);
+      await _loadEmbeddedLyrics(path, request);
     } else {
       // 外置文件：合并所有扩展名，按实际存在的格式取用。
       for (final external in LyricSource.values.where(
         (candidate) => candidate.isExternalFile,
       )) {
-        await _loadExternalLyrics(path, external);
+        await _loadExternalLyrics(path, external, request);
         if (_currentLyrics.isNotEmpty) return;
       }
     }
-    _notifyListeners();
+    if (_isCurrent(request, path)) _notifyListeners();
   }
 
   // 当前选中的网络歌词主源
@@ -258,6 +283,7 @@ class LyricsHandler {
   Future<void> _loadExternalLyrics(
     String songFilePath,
     LyricSource source,
+    int request,
   ) async {
     final extension = source.fileExtension;
     if (extension == null) return;
@@ -271,7 +297,8 @@ class LyricsHandler {
     if (!await lyricFile.exists()) return;
 
     try {
-      final bytes = await lyricFile.readAsBytes();
+      final bytes = await _readExternalBytes(lyricFile);
+      if (!_isCurrent(request, songFilePath)) return;
       final lyrics = _parseExternalLyric(bytes, source);
       if (lyrics != null && lyrics.isNotEmpty) {
         _currentLyrics = lyrics;
@@ -345,7 +372,7 @@ class LyricsHandler {
   }
 
   // 加载内嵌歌词
-  Future<void> _loadEmbeddedLyrics(String songFilePath) async {
+  Future<void> _loadEmbeddedLyrics(String songFilePath, int request) async {
     try {
       final isContentUri = AndroidContentResolver.isContentUri(songFilePath);
       final normalizedPath = isContentUri
@@ -353,7 +380,9 @@ class LyricsHandler {
           : Uri.file(songFilePath).toFilePath(windows: Platform.isWindows);
       final file = File(normalizedPath);
 
+      if (!_isCurrent(request, songFilePath)) return;
       if (!isContentUri && !await file.exists()) {
+        if (!_isCurrent(request, songFilePath)) return;
         _notificationService.error('歌曲文件不存在：${p.basename(songFilePath)}');
         _notifyListeners();
         return;
@@ -370,6 +399,7 @@ class LyricsHandler {
         ),
       );
 
+      if (!_isCurrent(request, songFilePath)) return;
       if (metadata.lyrics != null && metadata.lyrics!.isNotEmpty) {
         final lines = metadata.lyrics!.split(RegExp(r'\r?\n'));
         _currentLyrics = _parseLrcContent(lines);
@@ -392,10 +422,11 @@ class LyricsHandler {
   // 后台异步加载在线歌词
   Future<void> _loadOnlineLyricsPipeline(
     Song song, {
+    required int request,
     String? preferredSource,
   }) async {
     final currentSong = _getCurrentSong();
-    if (currentSong == null || currentSong.filePath != song.filePath) {
+    if (currentSong == null || !_isCurrent(request, song.filePath)) {
       return; // 已经切歌，直接废弃
     }
 
@@ -419,7 +450,7 @@ class LyricsHandler {
 
     for (final src in sourcesToTry) {
       // 检查播放中是否已切换歌曲
-      if (_getCurrentSong()?.filePath != song.filePath) return;
+      if (!_isCurrent(request, song.filePath)) return;
 
       ParsedLyrics? result;
       // int? foundSongId;
@@ -461,7 +492,7 @@ class LyricsHandler {
         // }
 
         if (result != null && result.lines.isNotEmpty) {
-          if (_getCurrentSong()?.filePath == song.filePath) {
+          if (_isCurrent(request, song.filePath)) {
             final converted = LyricConverter.convert(result);
             final withInterludes = _processInterludes(converted);
             _currentLyrics = withInterludes;
@@ -475,7 +506,7 @@ class LyricsHandler {
     }
 
     // 所有在线源均未获取到歌词
-    if (_getCurrentSong()?.filePath == song.filePath) {
+    if (_isCurrent(request, song.filePath)) {
       _currentLyrics = [];
       _notifyListeners();
     }
@@ -489,8 +520,8 @@ class LyricsHandler {
   ///   3. 音频文件内嵌歌词（NetworkTagReader 读文件头得到，纯本地、不联网）；
   ///   4. 在线歌词（用户启用时）作为最后的兜底。
   /// 全程异步、不阻塞播放；每一步都校验当前歌曲未被切走。
-  Future<void> _loadNetworkLyricsPipeline(Song song, String path) async {
-    bool stillCurrent() => _getCurrentSong()?.filePath == path;
+  Future<void> _loadNetworkLyricsPipeline(Song song, String path, int request) async {
+    bool stillCurrent() => _isCurrent(request, path);
 
     // 1) B 站官方字幕
     final target = RemoteMediaRegistry.decodeTarget(path);
@@ -564,6 +595,7 @@ class LyricsHandler {
     try {
       await _loadOnlineLyricsPipeline(
         song,
+        request: request,
         preferredSource: _preferredOnlineSource(),
       );
     } catch (_) {
@@ -1287,6 +1319,7 @@ class LyricsHandler {
   }
 
   void updateLyricLine(Duration currentPosition) {
+    if (_disposed) return;
     _lastKnownPosition = currentPosition;
 
     if (_currentLyrics.isEmpty) {

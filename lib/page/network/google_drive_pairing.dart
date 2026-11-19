@@ -60,23 +60,24 @@ class DrivePairingServer {
   String? _address;
   int _port = _firstPort;
   bool _finished = false;
+  bool _submitting = false;
 
   String get pair => _pair;
   String get url => 'http://${_address ?? '127.0.0.1'}:$_port/?pair=$_pair';
 
-  Future<void> start() async {
+  Future<void> start({InternetAddress? bindAddress, int? port}) async {
     _pair = _randomPair();
-    final ip = await _lanAddress();
+    final ip = bindAddress?.address ?? await _lanAddress();
     if (ip == null) {
       throw StateError('未找到局域网地址，请确认电视已连接 WiFi / 网线');
     }
     _address = ip;
     HttpServer? server;
-    for (var i = 0; i < _portAttempts; i++) {
+    for (var i = 0; i < (port == null ? _portAttempts : 1); i++) {
       try {
         server = await HttpServer.bind(
-          InternetAddress.anyIPv4,
-          _firstPort + i,
+          bindAddress ?? InternetAddress.anyIPv4,
+          port ?? _firstPort + i,
           shared: false,
         );
         _port = server.port;
@@ -170,7 +171,23 @@ class DrivePairingServer {
           refreshToken: refreshToken,
           rootFolderId: text('rootFolderId'),
         );
-        final error = await onSubmit(result);
+        // A second POST can arrive while the first credential probe awaits the
+        // network. Never let it share the probe cache or complete twice.
+        if (_finished || _submitting) {
+          _json(response, HttpStatus.conflict, <String, dynamic>{
+            'ok': false, 'error': _finished
+                ? '本次配对已完成，请在电视上重新打开配对页'
+                : '正在校验上一份凭据，请稍候',
+          });
+          return;
+        }
+        _submitting = true;
+        final String? error;
+        try {
+          error = await onSubmit(result);
+        } finally {
+          _submitting = false;
+        }
         if (error != null) {
           _json(response, HttpStatus.badRequest, <String, dynamic>{
             'ok': false,
@@ -276,10 +293,9 @@ class _DrivePairingDialogState extends State<_DrivePairingDialog> {
   /// 提交时立刻用 refresh_token 换一次 access_token 并读账号信息，
   /// 凭据不对就在手机配页上直接报错，不会悄悄存进电视。
   Future<String?> _onSubmit(DrivePairingResult result) async {
+    final probe = result.toSource('pairing-probe');
     try {
-      final probe = result.toSource('pairing-probe');
       final account = await GoogleDriveAuth.accountLabel(probe);
-      GoogleDriveAuth.invalidate(probe.id);
       if (!mounted) return '电视已关闭配对页';
       if (!_finished) {
         _finished = true;
@@ -299,6 +315,10 @@ class _DrivePairingDialogState extends State<_DrivePairingDialog> {
       return null;
     } catch (error) {
       return '凭据校验失败：$error';
+    } finally {
+      // about() can fail after a refresh has already populated the cache.
+      // The next retry may contain different credentials.
+      GoogleDriveAuth.invalidate(probe.id);
     }
   }
 

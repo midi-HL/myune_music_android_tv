@@ -70,11 +70,15 @@ class NetworkLibraryStore {
   List<Song> _decode(List<String>? raw) {
     if (raw == null) return <Song>[];
     final songs = <Song>[];
+    final seen = <String>{};
     for (final item in raw) {
       try {
         final decoded = jsonDecode(item);
         if (decoded is Map<String, dynamic>) {
-          songs.add(Song.fromJson(decoded));
+          final song = Song.fromJson(decoded);
+          if (seen.add(RemoteMediaRegistry.identityOf(song.filePath))) {
+            songs.add(song);
+          }
         }
       } catch (_) {
         // 跳过损坏条目。
@@ -93,8 +97,8 @@ class NetworkLibraryStore {
 
   bool isFavorite(String filePath) => _favorites.any(
     (s) =>
-        RemoteMediaRegistry.normalizePlayablePath(s.filePath) ==
-        RemoteMediaRegistry.normalizePlayablePath(filePath),
+        RemoteMediaRegistry.identityOf(s.filePath) ==
+        RemoteMediaRegistry.identityOf(filePath),
   );
 
   /// 收藏 / 取消收藏。返回 true 表示「现在是已收藏」。
@@ -102,10 +106,10 @@ class NetworkLibraryStore {
     await load();
     if (!isNetworkDrive(song)) return false;
     final normalized = RemoteMediaRegistry.normalizeSong(song);
-    final key = RemoteMediaRegistry.normalizePlayablePath(normalized.filePath);
+    final key = RemoteMediaRegistry.identityOf(normalized.filePath);
     final index = _favorites.indexWhere(
       (s) =>
-          RemoteMediaRegistry.normalizePlayablePath(s.filePath) == key,
+          RemoteMediaRegistry.identityOf(s.filePath) == key,
     );
     final added = index < 0;
     if (added) {
@@ -131,10 +135,10 @@ class NetworkLibraryStore {
     for (final raw in songs) {
       if (!isNetworkDrive(raw)) continue;
       final song = RemoteMediaRegistry.normalizeSong(raw);
-      final key = RemoteMediaRegistry.normalizePlayablePath(song.filePath);
+      final key = RemoteMediaRegistry.identityOf(song.filePath);
       if (_favorites.any(
         (s) =>
-            RemoteMediaRegistry.normalizePlayablePath(s.filePath) == key,
+            RemoteMediaRegistry.identityOf(s.filePath) == key,
       )) {
         continue;
       }
@@ -151,11 +155,11 @@ class NetworkLibraryStore {
 
   Future<void> remove(String filePath) async {
     await load();
-    final key = RemoteMediaRegistry.normalizePlayablePath(filePath);
+    final key = RemoteMediaRegistry.identityOf(filePath);
     final before = _favorites.length;
     _favorites.removeWhere(
       (s) =>
-          RemoteMediaRegistry.normalizePlayablePath(s.filePath) == key,
+          RemoteMediaRegistry.identityOf(s.filePath) == key,
     );
     if (_favorites.length != before) await _persist();
   }

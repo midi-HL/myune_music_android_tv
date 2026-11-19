@@ -151,6 +151,15 @@ class _TvInputScopeState extends State<TvInputScope> {
     final navigation = context.read<NavigationNotifier>();
 
     switch (action) {
+      case TvAction.play:
+        if (!notifier.isPlaying) notifier.play();
+        break;
+      case TvAction.pause:
+        if (notifier.isPlaying) notifier.pause();
+        break;
+      case TvAction.stop:
+        notifier.stop();
+        break;
       case TvAction.playPause:
         if (notifier.isPlaying) {
           notifier.pause();
@@ -188,7 +197,7 @@ class _TvInputScopeState extends State<TvInputScope> {
         break;
       case TvAction.openQueue:
         TvFocusController.instance.openEndDrawerAndFocus(
-          () => tvScaffoldKey.currentState?.openEndDrawer(),
+          TvBackHandler.openQueue,
         );
         break;
       case TvAction.openPlayerPage:

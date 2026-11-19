@@ -92,6 +92,7 @@ class _PlaylistListWidgetState extends State<PlaylistListWidget> {
   ) async {
     final RenderBox overlay =
         Overlay.of(context).context.findRenderObject() as RenderBox;
+    position = overlay.globalToLocal(position);
     final playlistNotifier = Provider.of<PlaylistContentNotifier>(
       context,
       listen: false,
@@ -698,6 +699,18 @@ class _PlaylistTileWidgetState extends State<PlaylistTileWidget> {
             widget.onSecondaryTap(details.globalPosition);
           },
           child: ListTile(
+            trailing: Platform.isAndroid
+                ? IconButton(
+                    tooltip: '歌单更多操作',
+                    icon: const Icon(Icons.more_vert),
+                    onPressed: () {
+                      final box = context.findRenderObject() as RenderBox;
+                      widget.onSecondaryTap(
+                        box.localToGlobal(box.size.bottomRight(Offset.zero)),
+                      );
+                    },
+                  )
+                : null,
             title: Row(
               children: [
                 Expanded(
@@ -1767,6 +1780,7 @@ class _SongTileWidgetState extends State<SongTileWidget>
   ) async {
     final notifier = context.read<PlaylistContentNotifier>();
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+    position = overlay.globalToLocal(position);
     final colorScheme = Theme.of(context).colorScheme;
     final iconColor = colorScheme.primary.withValues(alpha: 0.8);
 
@@ -2250,6 +2264,19 @@ class _SongTileWidgetState extends State<SongTileWidget>
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      if (Platform.isAndroid &&
+                          widget.enableContextMenu && !isMultiSelectMode)
+                        IconButton(
+                          tooltip: '歌曲更多操作',
+                          icon: const Icon(Icons.more_vert),
+                          onPressed: () {
+                            final box = context.findRenderObject() as RenderBox;
+                            _showSongContextMenu(
+                              box.localToGlobal(box.size.bottomRight(Offset.zero)),
+                              notifier,
+                            );
+                          },
+                        ),
                       if (isMultiSelectMode) ...[
                         Theme(
                           data: Theme.of(context).copyWith(

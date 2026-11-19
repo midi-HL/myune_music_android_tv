@@ -543,7 +543,7 @@ class BiliClient {
       );
     }
     return BiliVideoDetail(
-      bvid: bvid,
+      bvid: (data['bvid'] ?? bvid).toString(),
       title: _cleanHtml((data['title'] ?? bvid).toString()),
       author: data['owner'] is Map
           ? _cleanHtml((data['owner']['name'] ?? '').toString())

@@ -1,30 +1,49 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:myune_music/main.dart';
+import 'package:myune_music/tv/tv_app_info.dart';
+import 'package:myune_music/widgets/ui_scale_scope.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('Android package and in-app release versions agree', () {
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    final match = RegExp(r'^version: ([^+\s]+)\+(\d+)$', multiLine: true)
+        .firstMatch(pubspec);
+    expect(match, isNotNull);
+    expect(match!.group(1), TvAppInfo.version);
+    expect(int.parse(match.group(2)!), greaterThan(1));
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  Future<double> scaleFor(WidgetTester tester, Size size, double visual) async {
+    late double result;
+    await tester.pumpWidget(
+      MediaQuery(
+        data: MediaQueryData(size: size),
+        child: UiScaleScope(
+          visualScale: visual,
+          child: Builder(builder: (context) {
+            result = playPageScale(context);
+            return const SizedBox.shrink();
+          }),
+        ),
+      ),
+    );
+    return result;
+  }
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+  testWidgets('Player scale compensates the enclosing Android transform',
+      (tester) async {
+    const size = Size(1150, 620);
+    final baseline = await scaleFor(tester, size, 1);
+    final scaled = await scaleFor(tester, size, 0.72);
+    expect(baseline, 1);
+    expect(scaled * 0.72, closeTo(baseline, 0.00001));
+  });
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  testWidgets('Larger screens retain the established player size limit',
+      (tester) async {
+    expect(await scaleFor(tester, const Size(1920, 1080), 1), 1);
+    expect(await scaleFor(tester, const Size(3840, 2160), 1), 1);
   });
 }

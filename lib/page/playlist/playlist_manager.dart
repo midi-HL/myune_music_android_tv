@@ -7,6 +7,23 @@ import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class PlaylistManager {
+  Future<void> _playbackWrites = Future<void>.value();
+
+  Future<void> _queuePlaybackWrite(Future<void> Function() operation) {
+    final result = _playbackWrites.then((_) => operation());
+    _playbackWrites = result.then<void>((_) {}, onError: (Object _, StackTrace __) {});
+    return result;
+  }
+
+  Future<void> savePlaybackSnapshot(PlaybackState state, List<String> queue) {
+    final contents = jsonEncode({...state.toJson(), 'queue': List<String>.from(queue)});
+    return _queuePlaybackWrite(() async {
+      final file = await _getPlaybackStateFile();
+      final temporary = File('${file.path}.tmp');
+      await temporary.writeAsString(contents, flush: true);
+      await temporary.rename(file.path);
+    });
+  }
   static const String _playlistMetadataFileName = 'playlists_metadata.json';
   static const String _songsSubdirectory = 'playlist_songs';
   static const String _allSongsOrderFileName = 'all_songs_order.json';
@@ -370,6 +387,7 @@ class PlaylistManager {
 
   // 加载播放状态
   Future<PlaybackState?> loadPlaybackState() async {
+    await _playbackWrites;
     try {
       final file = await _getPlaybackStateFile();
       if (await file.exists()) {
@@ -384,7 +402,7 @@ class PlaylistManager {
   }
 
   // 清除播放状态
-  Future<void> clearPlaybackState() async {
+  Future<void> clearPlaybackState() => _queuePlaybackWrite(() async {
     try {
       final file = await _getPlaybackStateFile();
       if (await file.exists()) {
@@ -393,7 +411,7 @@ class PlaylistManager {
     } catch (e) {
       //
     }
-  }
+  });
 
   // 保存播放队列
   Future<void> savePlaybackQueue(List<String> queue) async {
@@ -407,6 +425,16 @@ class PlaylistManager {
 
   // 加载播放队列
   Future<List<String>?> loadPlaybackQueue() async {
+    await _playbackWrites;
+    try {
+      final snapshot = await _getPlaybackStateFile();
+      if (await snapshot.exists()) {
+        final data = jsonDecode(await snapshot.readAsString());
+        if (data is Map && data['queue'] is List) {
+          return List<String>.from(data['queue'] as List);
+        }
+      }
+    } catch (_) {}
     try {
       final file = await _getPlaybackQueueFile();
       if (await file.exists()) {
@@ -420,7 +448,7 @@ class PlaylistManager {
   }
 
   // 清除播放队列
-  Future<void> clearPlaybackQueue() async {
+  Future<void> clearPlaybackQueue() => _queuePlaybackWrite(() async {
     try {
       final file = await _getPlaybackQueueFile();
       if (await file.exists()) {
@@ -429,5 +457,5 @@ class PlaylistManager {
     } catch (e) {
       //
     }
-  }
+  });
 }

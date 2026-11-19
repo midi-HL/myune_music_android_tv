@@ -57,11 +57,15 @@ class BiliLibraryStore {
   List<Song> _decode(List<String>? raw) {
     if (raw == null) return <Song>[];
     final songs = <Song>[];
+    final seen = <String>{};
     for (final item in raw) {
       try {
         final decoded = jsonDecode(item);
         if (decoded is Map<String, dynamic>) {
-          songs.add(Song.fromJson(decoded));
+          final song = Song.fromJson(decoded);
+          if (seen.add(RemoteMediaRegistry.identityOf(song.filePath))) {
+            songs.add(song);
+          }
         }
       } catch (_) {
         // 跳过损坏的历史条目。
@@ -79,14 +83,21 @@ class BiliLibraryStore {
     await prefs.setStringList(_historyKey, _encode(_history));
   }
 
-  bool isFavorite(String filePath) =>
-      _favorites.any((s) => s.filePath == filePath);
+  bool isFavorite(String filePath) => _favorites.any(
+    (s) => RemoteMediaRegistry.identityOf(s.filePath) ==
+        RemoteMediaRegistry.identityOf(filePath),
+  );
 
   Future<bool> toggleFavorite(Song song) async {
     await load();
-    final index = _favorites.indexWhere((s) => s.filePath == song.filePath);
+    final key = RemoteMediaRegistry.identityOf(song.filePath);
+    final index = _favorites.indexWhere(
+      (s) => RemoteMediaRegistry.identityOf(s.filePath) == key,
+    );
     if (index >= 0) {
-      _favorites.removeAt(index);
+      _favorites.removeWhere(
+        (s) => RemoteMediaRegistry.identityOf(s.filePath) == key,
+      );
       await _persist();
       return false;
     }
@@ -101,7 +112,7 @@ class BiliLibraryStore {
     var changed = false;
     for (final song in songs) {
       if (song.filePath.isEmpty) continue;
-      if (_favorites.any((s) => s.filePath == song.filePath)) continue;
+      if (isFavorite(song.filePath)) continue;
       _favorites.insert(0, song);
       RemoteMediaRegistry.register(song.filePath, song);
       changed = true;
@@ -111,14 +122,20 @@ class BiliLibraryStore {
 
   Future<void> removeFavorite(String filePath) async {
     await load();
-    _favorites.removeWhere((s) => s.filePath == filePath);
+    final key = RemoteMediaRegistry.identityOf(filePath);
+    _favorites.removeWhere(
+      (s) => RemoteMediaRegistry.identityOf(s.filePath) == key,
+    );
     await _persist();
   }
 
   Future<void> recordPlay(Song song) async {
     await load();
     if (song.filePath.isEmpty) return;
-    _history.removeWhere((s) => s.filePath == song.filePath);
+    final key = RemoteMediaRegistry.identityOf(song.filePath);
+    _history.removeWhere(
+      (s) => RemoteMediaRegistry.identityOf(s.filePath) == key,
+    );
     _history.insert(0, song);
     if (_history.length > _maxHistory) {
       _history.removeRange(_maxHistory, _history.length);

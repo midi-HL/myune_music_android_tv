@@ -46,7 +46,7 @@ import 'tv/tv_navigation.dart';
 import 'tv/tv_settings.dart';
 import 'widgets/ui_scale_scope.dart';
 
-void main() async {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   AppLicenses.register();

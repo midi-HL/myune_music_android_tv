@@ -3,7 +3,6 @@ import 'dart:io';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
-import '../tv/tv_device.dart';
 import '../tv/tv_focus_nav.dart';
 
 class HoverOverlayControl extends StatefulWidget {
@@ -38,6 +37,9 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
   OverlayEntry? _overlayEntry;
   bool _isHovering = false;
   late final VoidCallback _closeCallback;
+  final FocusNode _buttonFocus = FocusNode(debugLabel: 'volume-overlay-button');
+  final GlobalKey _overlayFocusKey = GlobalKey();
+  bool _disposing = false;
 
   @override
   void initState() {
@@ -63,7 +65,10 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
                   elevation: 4,
                   borderRadius: BorderRadius.circular(8),
                   color: Theme.of(context).colorScheme.surfaceContainerLow,
-                  child: widget.overlayContentBuilder(context),
+                  child: TvFocusLayer(
+                    key: _overlayFocusKey,
+                    child: widget.overlayContentBuilder(context),
+                  ),
                 ),
               ),
             ),
@@ -74,23 +79,25 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
     Overlay.of(context).insert(_overlayEntry!);
     // 返回键优先关闭浮层，而不是直接退页面 / 退出应用。
     TvOverlayRegistry.instance.add(_closeCallback);
-    if (TvDevice.isTv) {
+    if (Platform.isAndroid) {
       TvFocusController.instance.scheduleFocusWhere(
-        (context) =>
-            context.widget is Slider ||
-            context.findAncestorWidgetOfExactType<Slider>() != null,
+        (context) => context.findAncestorWidgetOfExactType<TvFocusLayer>()?.key ==
+            _overlayFocusKey,
       );
     }
   }
 
   void _removeOverlay() {
     TvOverlayRegistry.instance.remove(_closeCallback);
+    if (_overlayEntry == null) return;
     _overlayEntry?.remove();
     _overlayEntry = null;
     // 浮层内的焦点节点随 OverlayEntry 一起销毁；重新给方向键找一个起点，
     // 否则关掉音量条后焦点落空，下一次方向键又会空转。
-    if (mounted && TvDevice.isTv) {
-      TvFocusController.instance.scheduleEnsureFocus();
+    if (mounted && !_disposing && Platform.isAndroid) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && !_disposing) _buttonFocus.requestFocus();
+      });
     }
   }
 
@@ -108,7 +115,9 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
 
   @override
   void dispose() {
+    _disposing = true;
     _removeOverlay();
+    _buttonFocus.dispose();
     super.dispose();
   }
 
@@ -131,6 +140,7 @@ class HoverOverlayControlState extends State<HoverOverlayControl> {
           },
           onExit: (_) => _setHovering(false),
           child: IconButton(
+            focusNode: _buttonFocus,
             iconSize: widget.size,
             icon: Icon(
               widget.icon,

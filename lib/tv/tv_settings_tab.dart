@@ -105,7 +105,7 @@ class TvSettingsTab extends StatelessWidget {
             ),
           ],
         ),
-        _SectionCard(
+        if (TvDevice.isTv) _SectionCard(
           title: '电视画面',
           children: <Widget>[
             _ScaleSlider(

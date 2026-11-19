@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'dart:io';
 import 'package:provider/provider.dart';
 
 import '../page/pages/play_list.dart';
@@ -180,7 +181,7 @@ class _MainViewState extends State<MainView> {
     required ValueChanged<int> onSelect,
     required Color railColor,
   }) {
-    if (!TvDevice.isTv) {
+    if (!Platform.isAndroid) {
       return SafeArea(
         child: NavigationRail(
           backgroundColor: railColor,
@@ -194,39 +195,51 @@ class _MainViewState extends State<MainView> {
       );
     }
 
+    final showLabels = TvDevice.isTv;
     return SafeArea(
       child: Container(
-        width: 116,
+        width: showLabels ? 116 : 80,
         color: railColor,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            for (int i = 0; i < entries.length; i++)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 6,
-                  vertical: 4,
-                ),
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    // 鼠标 / 触控与遥控器 OK 走同一个 onSelect，方便真机排查。
-                    onTap: () => onSelect(i),
-                    child: TvFocusHighlight(
-                      autofocus: i == 0,
-                      debugLabel: 'tv-rail-${entries[i].routeName}',
-                      onActivate: () => onSelect(i),
-                      builder: (context, focused) => _TvRailItem(
-                        entry: entries[i],
-                        selected: i == currentIndex,
-                        focused: focused,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  for (int i = 0; i < entries.length; i++)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 4,
+                      ),
+                      child: MouseRegion(
+                        cursor: SystemMouseCursors.click,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () => onSelect(i),
+                          child: TvFocusHighlight(
+                            autofocus: i == 0,
+                            debugLabel: 'tv-rail-${entries[i].routeName}',
+                            onActivate: () => onSelect(i),
+                            builder: (context, focused) => Tooltip(
+                              message: entries[i].label,
+                              child: _TvRailItem(
+                                entry: entries[i],
+                                selected: i == currentIndex,
+                                focused: focused,
+                                showLabel: showLabels,
+                              ),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
+                ],
               ),
-          ],
+            ),
+          ),
         ),
       ),
     );
@@ -349,11 +362,13 @@ class _TvRailItem extends StatelessWidget {
     required this.entry,
     required this.selected,
     required this.focused,
+    required this.showLabel,
   });
 
   final PageEntry entry;
   final bool selected;
   final bool focused;
+  final bool showLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -370,7 +385,7 @@ class _TvRailItem extends StatelessWidget {
     }
     return AnimatedContainer(
       duration: const Duration(milliseconds: 120),
-      height: 52,
+      height: showLabel ? 52 : 48,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
         color: background,
@@ -378,10 +393,11 @@ class _TvRailItem extends StatelessWidget {
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: showLabel ? MainAxisAlignment.start : MainAxisAlignment.center,
         children: <Widget>[
           Icon(selected ? entry.selectedIcon : entry.icon, size: 21, color: color),
-          const SizedBox(width: 8),
-          Flexible(
+          if (showLabel) const SizedBox(width: 8),
+          if (showLabel) Flexible(
             child: Text(
               entry.label,
               overflow: TextOverflow.ellipsis,

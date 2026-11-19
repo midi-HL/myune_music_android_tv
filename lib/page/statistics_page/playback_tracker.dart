@@ -6,7 +6,15 @@ import 'statistics_models.dart';
 class PlaybackTracker {
   static final PlaybackTracker _instance = PlaybackTracker._internal();
   factory PlaybackTracker() => _instance;
-  PlaybackTracker._internal();
+  PlaybackTracker._internal({DateTime Function()? now, void Function(SongPlayStat)? record})
+      : _now = now ?? DateTime.now,
+        _record = record ?? StatisticsManager().recordSongPlayed;
+
+  PlaybackTracker.forTesting({required DateTime Function() now, required void Function(SongPlayStat) record})
+      : this._internal(now: now, record: record);
+
+  final DateTime Function() _now;
+  final void Function(SongPlayStat) _record;
 
   Song? _currentSong;
   DateTime? _playStartTime;
@@ -19,7 +27,7 @@ class PlaybackTracker {
     stopTracking();
 
     _currentSong = song;
-    _playStartTime = DateTime.now();
+    _playStartTime = _now();
     _hasRecorded = false; // 新歌曲开始播放，重置标志位
     _accumulatedPlayTime = Duration.zero; // 重置累计播放时间
 
@@ -40,7 +48,7 @@ class PlaybackTracker {
   void pauseTracking() {
     if (_playTimer != null && _playStartTime != null) {
       // 累加本次播放时间
-      _accumulatedPlayTime += DateTime.now().difference(_playStartTime!);
+      _accumulatedPlayTime += _now().difference(_playStartTime!);
       _playTimer?.cancel();
       _playTimer = null;
       _playStartTime = null;
@@ -49,8 +57,8 @@ class PlaybackTracker {
 
   // 恢复跟踪（例如当歌曲恢复播放时）
   void resumeTracking() {
-    if (_currentSong != null && !_hasRecorded) {
-      _playStartTime = DateTime.now();
+    if (_currentSong != null && !_hasRecorded && _playStartTime == null) {
+      _playStartTime = _now();
       _updateTimer();
     }
   }
@@ -81,7 +89,7 @@ class PlaybackTracker {
         path: _currentSong!.filePath,
       );
 
-      StatisticsManager().recordSongPlayed(stat);
+      _record(stat);
       _hasRecorded = true; // 标记为已记录
     }
 

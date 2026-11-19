@@ -5,6 +5,8 @@ package oauth
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -34,9 +37,17 @@ type Tokens struct {
 }
 
 // NewState 生成一次性 state，防止 CSRF。
-func NewState() string {
-	// 用纳秒时间 + 随机端口占用情况做简单熵；state 只用于本地回环校验。
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+func NewState() (string, error) {
+	var bytes [32]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", fmt.Errorf("生成授权 state 失败: %w", err)
+	}
+	return hex.EncodeToString(bytes[:]), nil
+}
+
+type CallbackResult struct {
+	Code string
+	Err  error
 }
 
 // AuthURLFor 生成浏览器授权地址。
@@ -55,13 +66,15 @@ func AuthURLFor(clientID, state string) string {
 
 // StartLoopback 在 127.0.0.1:53682 起一个临时服务，等待浏览器回调。
 // 返回的 channel 只投递一次授权码；ctx 取消或超时会关闭服务。
-func StartLoopback(ctx context.Context, state string) (<-chan string, func(), error) {
+func StartLoopback(ctx context.Context, state string) (<-chan CallbackResult, func(), error) {
 	lc := net.ListenConfig{}
 	ln, err := lc.Listen(ctx, "tcp", ListenAddr)
 	if err != nil {
 		return nil, nil, fmt.Errorf("无法监听 %s（端口可能被占用）: %w", ListenAddr, err)
 	}
-	ch := make(chan string, 1)
+	ch := make(chan CallbackResult, 1)
+	var delivered sync.Once
+	finish := func(result CallbackResult) { delivered.Do(func() { ch <- result }) }
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
@@ -70,6 +83,7 @@ func StartLoopback(ctx context.Context, state string) (<-chan string, func(), er
 			return
 		}
 		if e := q.Get("error"); e != "" {
+			finish(CallbackResult{Err: fmt.Errorf("授权未完成：%s", e)})
 			http.Error(w, "授权被拒绝："+e, http.StatusBadRequest)
 			return
 		}
@@ -79,10 +93,7 @@ func StartLoopback(ctx context.Context, state string) (<-chan string, func(), er
 			return
 		}
 		_, _ = w.Write([]byte("<html><meta charset='utf-8'><body style='font:16px sans-serif;padding:40px'>授权完成，可以关闭本页并回到应用。</body></html>"))
-		select {
-		case ch <- code:
-		default:
-		}
+		finish(CallbackResult{Code: code})
 	})
 	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() { _ = srv.Serve(ln) }()

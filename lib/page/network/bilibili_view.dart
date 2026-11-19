@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -62,6 +64,11 @@ class BilibiliViewState extends State<BilibiliView>
   _BiliSection _section = _BiliSection.recommend;
   String _keyword = '';
   int _page = 1;
+  int _recommendPage = 1;
+  int _searchPage = 1;
+  int _listRequest = 0;
+  int _favRequest = 0;
+  int _detailRequest = 0;
   List<BiliVideo> _recommend = <BiliVideo>[];
   List<BiliVideo> _results = <BiliVideo>[];
   bool _loading = false;
@@ -135,6 +142,11 @@ class BilibiliViewState extends State<BilibiliView>
   bool get _canPage =>
       _section == _BiliSection.recommend || _section == _BiliSection.search;
 
+  void _rememberCurrentPage() {
+    if (_section == _BiliSection.recommend) _recommendPage = _page;
+    if (_section == _BiliSection.search) _searchPage = _page;
+  }
+
   // ===== 顶部工具条 =====
 
   Future<void> _promptSearch() async {
@@ -149,12 +161,17 @@ class BilibiliViewState extends State<BilibiliView>
     final keyword = value.trim();
     if (keyword.isEmpty) return;
     await _remember(keyword);
+    if (!mounted) return;
+    _rememberCurrentPage();
+    _favRequest++;
+    _detailRequest++;
     setState(() {
       _keyword = keyword;
       _page = 1;
       _section = _BiliSection.search;
       _selected = null;
       _detail = null;
+      _results = <BiliVideo>[];
     });
     await _search();
   }
@@ -166,7 +183,7 @@ class BilibiliViewState extends State<BilibiliView>
       hint: '粘贴 BV 号、av 号或 B 站视频链接',
       confirmLabel: '打开',
     );
-    if (value == null) return;
+    if (!mounted || value == null) return;
     final bvid = BiliClient.extractBvid(value);
     if (bvid == null) {
       await showTvAlert(context, '没有识别到 BV 号，请检查输入内容');
@@ -319,12 +336,16 @@ class BilibiliViewState extends State<BilibiliView>
           .toList(growable: false),
     );
     if (picked == null || !mounted) return;
+    _rememberCurrentPage();
     setState(() {
       _keyword = picked;
+      _favRequest++;
+      _detailRequest++;
       _page = 1;
       _section = _BiliSection.search;
       _selected = null;
       _detail = null;
+      _results = <BiliVideo>[];
     });
     await _search();
   }
@@ -333,10 +354,13 @@ class BilibiliViewState extends State<BilibiliView>
     if (!_canPage) return;
     final next = _page + delta;
     if (next < 1) return;
+    _detailRequest++;
     setState(() {
       _page = next;
       _selected = null;
       _detail = null;
+      if (_section == _BiliSection.recommend) _recommend = <BiliVideo>[];
+      if (_section == _BiliSection.search) _results = <BiliVideo>[];
     });
     if (_section == _BiliSection.recommend) {
       await _loadRecommend();
@@ -348,20 +372,24 @@ class BilibiliViewState extends State<BilibiliView>
   // ===== 数据加载 =====
 
   Future<void> _loadRecommend() async {
+    final page = _page;
+    final request = ++_listRequest;
+    bool isCurrent() => mounted && request == _listRequest &&
+        _section == _BiliSection.recommend && _page == page;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final list = await BiliClient.instance.recommend(page: _page);
-      if (!mounted) return;
+      final list = await BiliClient.instance.recommend(page: page);
+      if (!isCurrent()) return;
       setState(() {
         _recommend = list;
         _loading = false;
         if (list.isEmpty) _error = '暂时没有拿到推荐内容，按「重新加载」或改用搜索';
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _recommend = <BiliVideo>[];
         _loading = false;
@@ -375,23 +403,28 @@ class BilibiliViewState extends State<BilibiliView>
       await _promptSearch();
       return;
     }
+    final keyword = _keyword.trim();
+    final page = _page;
+    final request = ++_listRequest;
+    bool isCurrent() => mounted && request == _listRequest &&
+        _section == _BiliSection.search && _keyword.trim() == keyword &&
+        _page == page;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final results = await BiliClient.instance.search(
-        _keyword.trim(),
-        page: _page,
+        keyword,
+        page: page,
       );
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _results = results;
         _loading = false;
-        _section = _BiliSection.search;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _results = <BiliVideo>[];
         _loading = false;
@@ -401,8 +434,16 @@ class BilibiliViewState extends State<BilibiliView>
   }
 
   Future<void> _switchSection(_BiliSection section) async {
+    _rememberCurrentPage();
+    _listRequest++;
+    _favRequest++;
+    _detailRequest++;
     setState(() {
       _section = section;
+      if (section == _BiliSection.recommend) _page = _recommendPage;
+      if (section == _BiliSection.search) _page = _searchPage;
+      _loading = false;
+      _favLoading = false;
       _selected = null;
       _detail = null;
       _error = null;
@@ -414,6 +455,9 @@ class BilibiliViewState extends State<BilibiliView>
     });
     if (section == _BiliSection.recommend && _recommend.isEmpty) {
       await _loadRecommend();
+    } else if (section == _BiliSection.search && _results.isEmpty &&
+        _keyword.trim().isNotEmpty) {
+      await _search();
     } else if (section == _BiliSection.history ||
         section == _BiliSection.favorites) {
       await _loadLibrary();
@@ -424,23 +468,27 @@ class BilibiliViewState extends State<BilibiliView>
 
   /// 进入「B站收藏夹」：拉取账号收藏夹列表。
   Future<void> _loadFavFolders() async {
+    final request = ++_favRequest;
+    bool isCurrent() => mounted && request == _favRequest &&
+        _section == _BiliSection.cloudFavorites;
     if (mounted) {
       setState(() {
         _favLoading = true;
         _favError = null;
+        _favFolders = <BiliFavFolder>[];
         _activeFolder = null;
         _favMedias = <BiliVideo>[];
       });
     }
     try {
       final folders = await BiliClient.instance.favFolders();
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _favFolders = folders;
         _favLoading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _favError = '$error';
         _favLoading = false;
@@ -450,6 +498,10 @@ class BilibiliViewState extends State<BilibiliView>
 
   /// 选中某个收藏夹，读取第一页内容。
   Future<void> _openFolder(BiliFavFolder folder) async {
+    final request = ++_favRequest;
+    bool isCurrent() => mounted && request == _favRequest &&
+        _section == _BiliSection.cloudFavorites &&
+        _activeFolder?.mediaId == folder.mediaId;
     setState(() {
       _activeFolder = folder;
       _favMedias = <BiliVideo>[];
@@ -463,14 +515,14 @@ class BilibiliViewState extends State<BilibiliView>
         folder.mediaId,
         pn: 1,
       );
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _favMedias = pageResult.videos;
         _favHasMore = pageResult.hasMore;
         _favLoading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _favError = '$error';
         _favLoading = false;
@@ -482,6 +534,10 @@ class BilibiliViewState extends State<BilibiliView>
   Future<void> _loadMoreFavMedias() async {
     final folder = _activeFolder;
     if (folder == null || _favLoading || !_favHasMore) return;
+    final request = ++_favRequest;
+    bool isCurrent() => mounted && request == _favRequest &&
+        _section == _BiliSection.cloudFavorites &&
+        _activeFolder?.mediaId == folder.mediaId;
     setState(() => _favLoading = true);
     try {
       final next = _favPage + 1;
@@ -489,7 +545,7 @@ class BilibiliViewState extends State<BilibiliView>
         folder.mediaId,
         pn: next,
       );
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _favPage = next;
         _favMedias = <BiliVideo>[..._favMedias, ...pageResult.videos];
@@ -497,7 +553,7 @@ class BilibiliViewState extends State<BilibiliView>
         _favLoading = false;
       });
     } catch (error) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _favError = '$error';
         _favLoading = false;
@@ -506,6 +562,9 @@ class BilibiliViewState extends State<BilibiliView>
   }
 
   Future<void> _openDetail(BiliVideo video) async {
+    final request = ++_detailRequest;
+    bool isCurrent() => mounted && request == _detailRequest &&
+        _selected != null;
     setState(() {
       _selected = video;
       _detail = null;
@@ -514,8 +573,14 @@ class BilibiliViewState extends State<BilibiliView>
     });
     try {
       final detail = await BiliClient.instance.view(video.bvid);
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
+        // Canonicalize an av/link input as soon as the API supplies its BV id.
+        _selected = BiliVideo(
+          bvid: detail.bvid, title: detail.title, author: detail.author,
+          cover: detail.cover, description: video.description,
+          durationSeconds: video.durationSeconds,
+        );
         _detail = detail;
         _detailLoading = false;
       });
@@ -526,19 +591,38 @@ class BilibiliViewState extends State<BilibiliView>
         // 保证外部 FocusNode 已经 attach 完成（与 TvFocusController 一致）。
         WidgetsBinding.instance.addPostFrameCallback((_) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (mounted && _playAllFocusNode.canRequestFocus) {
+            if (isCurrent() && _playAllFocusNode.canRequestFocus) {
               _playAllFocusNode.requestFocus();
             }
           });
         });
       }
     } catch (error) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _detailError = '$error';
         _detailLoading = false;
       });
     }
+  }
+
+  bool tryGoBack() {
+    if (!mounted) return false;
+    if (_selected != null) {
+      _detailRequest++;
+      setState(() {
+        _selected = null;
+        _detail = null;
+        _detailError = null;
+        _detailLoading = false;
+      });
+      return true;
+    }
+    if (_section == _BiliSection.cloudFavorites && _activeFolder != null) {
+      unawaited(_loadFavFolders());
+      return true;
+    }
+    return false;
   }
 
   // ===== 播放与收藏 =====
@@ -617,7 +701,7 @@ class BilibiliViewState extends State<BilibiliView>
 
   bool _isVideoFavorited(BiliVideo video) {
     for (final song in _favorites) {
-      final id = RemoteMediaRegistry.mediaIdOf(song.filePath) ?? '';
+      final id = RemoteMediaRegistry.identityOf(song.filePath);
       if (id.startsWith('bilibili:${video.bvid}:')) return true;
     }
     return false;
@@ -719,7 +803,7 @@ class BilibiliViewState extends State<BilibiliView>
                 onPressed: () => _changePage(1),
               ),
               const SizedBox(width: 10),
-              Text(
+              if (_canPage) Text(
                 '第 $_page 页',
                 style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),

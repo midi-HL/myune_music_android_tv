@@ -11,6 +11,7 @@ import '../../services/network/network_library.dart';
 import '../../services/network/network_media_service.dart';
 import '../../services/network/network_tag_reader.dart';
 import '../../services/network/remote_entry.dart';
+import '../../services/network/remote_media_registry.dart';
 import '../../services/network/remote_source.dart';
 import '../../services/network/remote_stream.dart';
 import 'google_drive_pairing.dart';
@@ -45,6 +46,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   bool _enqueueMode = false;
   bool _readTagsEnabled = true;
   bool _prefetching = false;
+  int _directoryRequest = 0;
 
   static const String _readTagsKey = 'starnote.network.readEmbeddedTags';
 
@@ -98,8 +100,9 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
 
   Future<void> _addSource() async {
     final source = await showTvSourceEditor(context: context);
-    if (source == null) return;
+    if (!mounted || source == null) return;
     await RemoteSourceStore.instance.upsert(source);
+    if (!mounted) return;
     _refreshSources();
     if (mounted) {
       await showTvAlert(context, '已保存「${source.name}」，选中后即可开始浏览');
@@ -111,9 +114,10 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   /// refresh_token 后由配对服务校验并直接落库，电视上不需要输入任何长串。
   Future<void> _addGoogleDriveSource() async {
     final result = await showDrivePairingDialog(context);
-    if (result == null) return;
+    if (!mounted || result == null) return;
     final id = 'gd-${DateTime.now().microsecondsSinceEpoch}';
     await RemoteSourceStore.instance.upsert(result.toSource(id));
+    if (!mounted) return;
     _refreshSources();
     if (mounted) {
       await showTvAlert(
@@ -135,8 +139,9 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       context: context,
       existing: active,
     );
-    if (updated == null) return;
+    if (!mounted || updated == null) return;
     await RemoteSourceStore.instance.upsert(updated);
+    if (!mounted) return;
     _refreshSources();
     setState(() {
       _active = updated;
@@ -156,8 +161,10 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       context,
       '确定删除网络源「${active.name}」吗？已保存的播放队列里若有该源的歌曲将无法播放。',
     );
-    if (!confirmed) return;
+    if (!mounted || !confirmed) return;
     await RemoteSourceStore.instance.remove(active.id);
+    if (!mounted) return;
+    _directoryRequest++;
     setState(() {
       _active = null;
       _selectedSource = null;
@@ -165,6 +172,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       _artworkUrl = null;
       _error = null;
       _history.clear();
+      _loading = false;
     });
     _refreshSources();
     _focusEntry();
@@ -187,6 +195,10 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   Future<void> _loadDirectory() async {
     final source = _active;
     if (source == null) return;
+    final path = _currentPath;
+    final request = ++_directoryRequest;
+    bool isCurrent() => mounted && request == _directoryRequest &&
+        identical(_active, source) && _currentPath == path;
     setState(() {
       _loading = true;
       _error = null;
@@ -194,9 +206,9 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
     try {
       final entries = await NetworkMediaService.listDirectory(
         source,
-        _currentPath,
+        path,
       );
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _entries = entries;
         // GDrive 的目录封面走文件头内嵌标签（NetworkTagReader），不走 NAS 相对路径。
@@ -209,7 +221,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       // 就地回填，结果落盘缓存，重启不重读。关闭开关后不产生额外流量。
       unawaited(_prefetchCurrentDirectory());
     } catch (error) {
-      if (!mounted) return;
+      if (!isCurrent()) return;
       setState(() {
         _entries = <RemoteEntry>[];
         _artworkUrl = null;
@@ -223,17 +235,26 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   /// 浏览视图里不提供任何其它退出 / 编辑 / 网络音乐入口。
   Future<void> _goUp() async {
     if (_history.isEmpty) {
+      _directoryRequest++;
       setState(() {
         _active = null;
         _entries = <RemoteEntry>[];
         _artworkUrl = null;
         _error = null;
+        _loading = false;
       });
       _focusEntry();
       return;
     }
     setState(() => _currentPath = _history.removeLast());
     await _loadDirectory();
+  }
+
+  /// Consume system Back before the app-level navigation exits this page.
+  bool tryGoBack() {
+    if (!mounted || _active == null) return false;
+    unawaited(_goUp());
+    return true;
   }
 
   void _openEntry(RemoteEntry entry) {
@@ -322,6 +343,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       return;
     }
     _prefetching = true;
+    final request = _directoryRequest;
     try {
       final found = await NetworkTagReader.prefetchAll(
         urls,
@@ -332,7 +354,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
         },
       );
       if (mounted) setState(() {});
-      if (manual && mounted) {
+      if (manual && mounted && request == _directoryRequest) {
         await showTvAlert(
           context,
           found > 0
@@ -342,6 +364,9 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       }
     } finally {
       _prefetching = false;
+      if (mounted && !_loading && _active != null && request != _directoryRequest) {
+        unawaited(_prefetchCurrentDirectory());
+      }
     }
   }
 
@@ -369,7 +394,10 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       return;
     }
     final added = await NetworkLibraryStore.instance.addAll(songs);
-    await _syncFavoritesToPlaylist(songs);
+    final keys = songs.map((s) => RemoteMediaRegistry.identityOf(s.filePath)).toSet();
+    await _syncFavoritesToPlaylist(NetworkLibraryStore.instance.favorites.where(
+      (s) => keys.contains(RemoteMediaRegistry.identityOf(s.filePath)),
+    ));
     if (!mounted) return;
     setState(() {});
     await showTvAlert(
@@ -382,6 +410,10 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
 
   Future<void> _toggleFavorite(RemoteEntry entry) async {
     final song = _songOf(entry);
+    final key = RemoteMediaRegistry.identityOf(song.filePath);
+    final previous = NetworkLibraryStore.instance.favorites.where(
+      (s) => RemoteMediaRegistry.identityOf(s.filePath) == key,
+    ).map((s) => s.filePath).toList();
     final added = await NetworkLibraryStore.instance.toggle(song);
     if (added) {
       await _syncFavoritesToPlaylist([song]);
@@ -390,7 +422,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       if (id != null) {
         await context
             .read<PlaylistContentNotifier>()
-            .removeSongPathsFromPlaylist(id, [song.filePath]);
+            .removeSongPathsFromPlaylist(id, [...previous, song.filePath]);
       }
     }
     if (mounted) setState(() {});
@@ -408,12 +440,19 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   Future<void> _playAudioAt(RemoteEntry entry) async {
     final source = _active;
     if (source == null) return;
+    final request = _directoryRequest;
     if (!await _ensureProxy()) return;
-    final playable = _playableEntries;
-    final index = playable.indexWhere((e) => e.path == entry.path);
-    if (index < 0) return;
-    final songs = playable.map(_songOf).toList();
-    await _dispatch(songs, index);
+    if (!mounted || request != _directoryRequest || !identical(source, _active)) return;
+    final selection = NetworkMediaService.directoryPlayback(
+      _entries, entry, enqueue: _enqueueMode,
+    );
+    if (selection.index < 0) return;
+    final songs = selection.entries.map(_songOf).toList();
+    if (_enqueueMode) {
+      await context.read<PlaylistContentNotifier>().addSongsToPlayingQueue(songs);
+      return;
+    }
+    await _dispatch(songs, selection.index);
   }
 
   Future<void> _playAll({required bool includeVideo}) async {
@@ -423,7 +462,9 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       await showTvAlert(context, '当前目录没有可播放的音频文件');
       return;
     }
+    final request = _directoryRequest;
     if (!await _ensureProxy()) return;
+    if (!mounted || request != _directoryRequest || !identical(source, _active)) return;
     final songs = entries.map(_songOf).toList();
     await _dispatch(songs, 0);
   }
@@ -434,18 +475,16 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       await showTvAlert(context, '当前目录没有可加入队列的音频文件');
       return;
     }
+    final request = _directoryRequest;
     if (!await _ensureProxy()) return;
+    if (!mounted || request != _directoryRequest || !identical(source, _active)) return;
     final songs = _audioEntries.map(_songOf).toList();
     await context.read<PlaylistContentNotifier>().addSongsToPlayingQueue(songs);
   }
 
   Future<void> _dispatch(List<Song> songs, int index) async {
     final notifier = context.read<PlaylistContentNotifier>();
-    if (_enqueueMode) {
-      await notifier.addSongsToPlayingQueue(songs);
-    } else {
-      await notifier.playFromDynamicList(songs, index);
-    }
+    await notifier.playFromDynamicList(songs, index);
   }
 
   Future<void> _openMore() async {

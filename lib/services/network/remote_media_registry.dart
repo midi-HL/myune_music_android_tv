@@ -60,6 +60,23 @@ class RemoteMediaRegistry {
     return value.isEmpty ? null : value;
   }
 
+  /// A media identity must survive proxy port, title/artwork and stream-mode
+  /// changes. Those describe how to play/display an item, not which item it is.
+  static String identityOf(String value) {
+    final target = decodeTarget(value);
+    final rawId = (target?['id'] ?? value).toString();
+    final bili = RegExp(r'^bilibili:([^:]+):(\d+)').firstMatch(rawId);
+    if (bili != null) return 'bilibili:${bili[1]}:${bili[2]}';
+    if (target == null) return normalizePlayablePath(value);
+    if (target['k'] == 'bili') {
+      return 'bilibili:${target['b']}:${target['c']}';
+    }
+    if (target['k'] == 'nas' || target['k'] == 'gd') {
+      return '${target['k']}:${target['s']}:${target['p']}';
+    }
+    return rawId;
+  }
+
   static Song? lookup(String urlOrId) {
     // 统一规范化：裸媒体标识还原成代理 URL、旧端口 URL 改写到当前端口。
     // 这样播放状态恢复、队列重建、歌曲详情等所有入口拿到的 filePath

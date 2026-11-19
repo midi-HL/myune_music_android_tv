@@ -22,7 +22,9 @@ class Song {
     this.albumArt,
     this.duration,
     this.trackNumber,
-  }) : normalizedPath = p.normalize(filePath);
+  }) : normalizedPath = filePath.contains('://') ||
+           filePath.startsWith('bilibili:') || filePath.startsWith('nas:') ||
+           filePath.startsWith('gd:') ? filePath : p.normalize(filePath);
 
   /// 封面写入 JSON，让「收藏 / 历史播放」里的网络媒体在应用重启后
   /// 仍能直接显示封面。设置上限避免 shared_preferences 被超大图撑爆。
@@ -228,17 +230,25 @@ class SongDetails {
 class PlaybackState {
   final String? playlistId;
   final int songIndex;
+  final bool usesQueue;
+  final String? songPath;
+  final List<int>? shuffleOrder;
 
-  PlaybackState({this.playlistId, required this.songIndex});
+  PlaybackState({this.playlistId, required this.songIndex, this.usesQueue = false,
+    this.songPath, this.shuffleOrder});
 
-  Map<String, dynamic> toJson() {
-    return {'playlistId': playlistId, 'songIndex': songIndex};
-  }
+  Map<String, dynamic> toJson() => {
+    'playlistId': playlistId, 'songIndex': songIndex,
+    'usesQueue': usesQueue, if (songPath != null) 'songPath': songPath,
+    if (shuffleOrder != null) 'shuffleOrder': shuffleOrder,
+  };
 
-  factory PlaybackState.fromJson(Map<String, dynamic> json) {
-    return PlaybackState(
-      playlistId: json['playlistId'],
-      songIndex: json['songIndex'],
-    );
-  }
+  factory PlaybackState.fromJson(Map<String, dynamic> json) => PlaybackState(
+    playlistId: json['playlistId'] as String?,
+    songIndex: (json['songIndex'] as num?)?.toInt() ?? -1,
+    usesQueue: json['usesQueue'] == true,
+    songPath: json['songPath'] as String?,
+    shuffleOrder: json['shuffleOrder'] is List
+        ? (json['shuffleOrder'] as List).whereType<int>().toList() : null,
+  );
 }
