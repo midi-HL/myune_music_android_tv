@@ -288,17 +288,19 @@ class LyricsHandler {
     final extension = source.fileExtension;
     if (extension == null) return;
 
-    final lyricFilePath = p.join(
-      p.dirname(songFilePath),
-      '${p.basenameWithoutExtension(songFilePath)}.$extension',
-    );
-
-    final lyricFile = File(lyricFilePath);
-    if (!await lyricFile.exists()) return;
-
     try {
-      final bytes = await _readExternalBytes(lyricFile);
-      if (!_isCurrent(request, songFilePath)) return;
+      final Uint8List? bytes;
+      if (AndroidContentResolver.isContentUri(songFilePath)) {
+        bytes = await AndroidContentResolver.readSidecarLyrics(songFilePath, extension);
+      } else {
+        final lyricFile = File(p.join(
+          p.dirname(songFilePath),
+          '${p.basenameWithoutExtension(songFilePath)}.$extension',
+        ));
+        if (!await lyricFile.exists()) return;
+        bytes = await _readExternalBytes(lyricFile);
+      }
+      if (bytes == null || bytes.isEmpty || !_isCurrent(request, songFilePath)) return;
       final lyrics = _parseExternalLyric(bytes, source);
       if (lyrics != null && lyrics.isNotEmpty) {
         _currentLyrics = lyrics;

@@ -81,7 +81,7 @@ class _PlaylistListWidgetState extends State<PlaylistListWidget> {
   ) {
     showDialog(
       context: context,
-      builder: (context) => _AddPlaylistDialog(notifier: notifier),
+      builder: (context) => AddPlaylistDialog(notifier: notifier),
     );
   }
 
@@ -459,20 +459,43 @@ class _FolderManagementWidgetState extends State<_FolderManagementWidget> {
   }
 }
 
-class _AddPlaylistDialog extends StatefulWidget {
+class AddPlaylistDialog extends StatefulWidget {
   final PlaylistContentNotifier notifier;
 
-  const _AddPlaylistDialog({required this.notifier});
+  const AddPlaylistDialog({required this.notifier, super.key});
 
   @override
-  State<_AddPlaylistDialog> createState() => _AddPlaylistDialogState();
+  State<AddPlaylistDialog> createState() => _AddPlaylistDialogState();
 }
 
-class _AddPlaylistDialogState extends State<_AddPlaylistDialog> {
+class _AddPlaylistDialogState extends State<AddPlaylistDialog> {
   final TextEditingController _controller = TextEditingController();
   final List<String> _selectedFolders = [];
   ManagementMode _selectedMode = ManagementMode.manual;
   bool _isCreating = false;
+
+  void _selectMode(ManagementMode? mode) {
+    if (_isCreating || mode == null) return;
+    setState(() => _selectedMode = mode);
+  }
+
+  Widget _modeOption(ManagementMode mode, String label) {
+    final checked = _selectedMode == mode;
+    return Semantics(
+      checked: checked,
+      inMutuallyExclusiveGroup: true,
+      child: ListTile(
+        enabled: !_isCreating,
+        contentPadding: EdgeInsets.zero,
+        leading: Icon(
+          checked ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+          color: checked ? Theme.of(context).colorScheme.primary : null,
+        ),
+        title: Text(label),
+        onTap: _isCreating ? null : () => _selectMode(mode),
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -531,14 +554,14 @@ class _AddPlaylistDialogState extends State<_AddPlaylistDialog> {
             ),
             const SizedBox(height: 16),
             const Text('选择管理模式：'),
-            RadioGroup<ManagementMode>(
+            // RadioGroup changes its selection on arrow keys. Android uses
+            // arrows to move focus through the dialog and OK to select.
+            if (Theme.of(context).platform == TargetPlatform.android) ...[
+              _modeOption(ManagementMode.manual, '手动管理歌单歌曲'),
+              _modeOption(ManagementMode.folder, '使用文件夹管理歌单'),
+            ] else RadioGroup<ManagementMode>(
               groupValue: _selectedMode,
-              onChanged: (value) {
-                if (_isCreating || value == null) return;
-                setState(() {
-                  _selectedMode = value;
-                });
-              },
+              onChanged: _selectMode,
               child: const Column(
                 children: [
                   RadioListTile<ManagementMode>(

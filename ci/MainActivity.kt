@@ -26,14 +26,20 @@ class MainActivity : FlutterActivity() {
     private val requestOpenTree = 4201
     private var pendingTreeResult: MethodChannel.Result? = null
     private var inputSink: EventChannel.EventSink? = null
+    // All SAF queries use the serial background task queue below.
+    private val documentParents = HashMap<Uri, String>()
+    private val lyricExtensions = setOf("lrc", "krc", "qrc", "yrc")
+    private val maxScanEntries = 20_000
+    private val maxLyricBytes = 512 * 1024
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         val messenger = flutterEngine.dartExecutor.binaryMessenger
 
-        MethodChannel(messenger, safChannel).setMethodCallHandler { call, result ->
+        MethodChannel(messenger, safChannel, io.flutter.plugin.common.StandardMethodCodec.INSTANCE,
+            messenger.makeBackgroundTaskQueue()).setMethodCallHandler { call, result ->
             when (call.method) {
-                "pickDirectoryTree" -> pickDirectoryTree(result)
+                "pickDirectoryTree" -> runOnUiThread { pickDirectoryTree(result) }
                 "listAudioFiles" -> {
                     val treeUri = call.argument<String>("treeUri")
                     if (treeUri == null) {
@@ -56,6 +62,19 @@ class MainActivity : FlutterActivity() {
                             result.success(readBytes(Uri.parse(uri), maxBytes))
                         } catch (e: Exception) {
                             result.error("READ_FAILED", e.message, null)
+                        }
+                    }
+                }
+                "getDisplayName" -> handleSafRead(call.argument<String>("uri"), result) { uri ->
+                    queryDisplayName(uri)
+                }
+                "readSidecarLyrics" -> {
+                    val extension = call.argument<String>("extension")
+                    if (extension == null || extension !in lyricExtensions) {
+                        result.error("INVALID", "Unsupported lyric file type", null)
+                    } else {
+                        handleSafRead(call.argument<String>("uri"), result) { uri ->
+                            readSidecarLyrics(uri, extension)
                         }
                     }
                 }
@@ -84,6 +103,22 @@ class MainActivity : FlutterActivity() {
                 }
             },
         )
+    }
+
+    private fun handleSafRead(
+        rawUri: String?,
+        result: MethodChannel.Result,
+        read: (Uri) -> Any?,
+    ) {
+        if (rawUri == null) {
+            result.error("INVALID", "uri is null", null)
+            return
+        }
+        try {
+            result.success(read(Uri.parse(rawUri)))
+        } catch (error: Exception) {
+            result.error("READ_FAILED", error.message, null)
+        }
     }
 
     private fun deviceInfo(): Map<String, Any> {
@@ -168,13 +203,8 @@ class MainActivity : FlutterActivity() {
 
     private fun listAudioFiles(treeUri: Uri): List<Map<String, String>> {
         val out = ArrayList<Map<String, String>>()
-        val queue = LinkedList<Uri>()
-        queue.add(
-            DocumentsContract.buildChildDocumentsUriUsingTree(
-                treeUri,
-                DocumentsContract.getTreeDocumentId(treeUri),
-            )
-        )
+        val queue = LinkedList<String>()
+        queue.add(DocumentsContract.getTreeDocumentId(treeUri))
         val audioExtensions = setOf(
             "wav", "wady", "wavarc", "flac", "alac", "ape", "mp3", "aac",
             "m4a", "ogg", "opus", "wma", "aiff", "pcm",
@@ -182,7 +212,8 @@ class MainActivity : FlutterActivity() {
         val seen = HashSet<String>()
         var visited = 0
         while (queue.isNotEmpty()) {
-            val childrenUri = queue.removeFirst()
+            val parentId = queue.removeFirst()
+            val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentId)
             val cursor = contentResolver.query(
                 childrenUri,
                 arrayOf(
@@ -198,7 +229,7 @@ class MainActivity : FlutterActivity() {
             cursor.use { c ->
                 while (c.moveToNext()) {
                     visited++
-                    if (visited > 20000) {
+                    if (visited > maxScanEntries) {
                         throw IllegalStateException("Directory scan exceeded 20000 entries; existing playlist was kept")
                     }
                     val docId = getString(c, DocumentsContract.Document.COLUMN_DOCUMENT_ID)
@@ -210,14 +241,13 @@ class MainActivity : FlutterActivity() {
                     if (!seen.add(docUri.toString())) continue
                     val isDirectory = mime == DocumentsContract.Document.MIME_TYPE_DIR
                     if (isDirectory) {
-                        queue.add(
-                            DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, docId)
-                        )
+                        queue.add(docId)
                     } else {
                         val ext = name.substringAfterLast('.', "").lowercase()
                         val isAudio = mime.startsWith("audio/") ||
                             audioExtensions.contains(ext)
                         if (isAudio) {
+                            documentParents[docUri] = parentId
                             out.add(
                                 mapOf(
                                     "uri" to docUri.toString(),
@@ -232,6 +262,89 @@ class MainActivity : FlutterActivity() {
             }
         }
         return out
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return contentResolver.query(
+            uri, arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME), null, null, null,
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) getString(cursor, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            else null
+        }
+    }
+
+    private fun findParentDocumentId(uri: Uri): String? {
+        documentParents[uri]?.let { return it }
+        val wantedId = DocumentsContract.getDocumentId(uri)
+        val queue = LinkedList<String>()
+        queue.add(DocumentsContract.getTreeDocumentId(uri))
+        val visitedDirectories = HashSet<String>()
+        var visited = 0
+        while (queue.isNotEmpty()) {
+            val parentId = queue.removeFirst()
+            if (!visitedDirectories.add(parentId)) continue
+            val cursor = contentResolver.query(
+                DocumentsContract.buildChildDocumentsUriUsingTree(uri, parentId),
+                arrayOf(
+                    DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                    DocumentsContract.Document.COLUMN_MIME_TYPE,
+                ),
+                null, null, null,
+            ) ?: continue
+            cursor.use { children ->
+                while (children.moveToNext()) {
+                    if (++visited > maxScanEntries) return null
+                    val childId = getString(children, DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                        ?: continue
+                    if (childId == wantedId) {
+                        documentParents[uri] = parentId
+                        return parentId
+                    }
+                    if (getString(children, DocumentsContract.Document.COLUMN_MIME_TYPE) ==
+                        DocumentsContract.Document.MIME_TYPE_DIR
+                    ) {
+                        queue.add(childId)
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun readSidecarLyrics(uri: Uri, extension: String): ByteArray? {
+        if (!DocumentsContract.isTreeUri(uri) || !DocumentsContract.isDocumentUri(this, uri)) {
+            return null
+        }
+        val name = queryDisplayName(uri) ?: return null
+        val expectedName = "${name.substringBeforeLast('.')}.$extension"
+        val parentId = findParentDocumentId(uri) ?: return null
+        val lyricsUri = contentResolver.query(
+            DocumentsContract.buildChildDocumentsUriUsingTree(uri, parentId),
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+            ),
+            null, null, null,
+        )?.use { cursor ->
+            var matched: Uri? = null
+            var visited = 0
+            while (cursor.moveToNext() && ++visited <= maxScanEntries) {
+                val childName = getString(cursor, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                val mime = getString(cursor, DocumentsContract.Document.COLUMN_MIME_TYPE)
+                if (childName.equals(expectedName, ignoreCase = true) &&
+                    mime != DocumentsContract.Document.MIME_TYPE_DIR
+                ) {
+                    val id = getString(cursor, DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+                        ?: continue
+                    matched = DocumentsContract.buildDocumentUriUsingTree(uri, id)
+                    break
+                }
+            }
+            matched
+        } ?: return null
+        val bytes = readBytes(lyricsUri, maxLyricBytes + 1)
+        return bytes.takeIf { it.isNotEmpty() && it.size <= maxLyricBytes }
     }
 
     private fun readBytes(uri: Uri, maxBytes: Int): ByteArray {

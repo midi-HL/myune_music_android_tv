@@ -42,7 +42,7 @@
 
 This patch addresses directional navigation, editing and Back behavior, playback
 queue state and stale asynchronous work, network favorites, and Drive pairing.
-The Android package and in-app version now agree on `1.7.1` (versionCode `10701`),
+The Android package and in-app version now agree on `1.7.1` (versionCode `10702`),
 using the existing signing certificate.
 
 Dart analysis, business/widget regression tests and Go/Python pairing tests now

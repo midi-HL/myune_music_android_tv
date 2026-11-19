@@ -62,14 +62,13 @@ class _PlaybarState extends State<Playbar> {
     final Color onBarColor = colorScheme.onSurface;
     final Color accentColor = colorScheme.primary;
 
-    // 获取屏幕宽度
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isNarrowScreen = screenWidth < 700;
-
     final double playbarHeight = snapToDevicePixel(context, 70.0);
 
     // 顶级 Consumer，确保 Playbar 整体能响应 PlaylistContentNotifier 的变化
-    return Consumer<PlaylistContentNotifier>(
+    return LayoutBuilder(builder: (context, constraints) {
+      // UI scaling changes the layout canvas without changing MediaQuery.
+      final narrow = constraints.maxWidth < 820;
+      return Consumer<PlaylistContentNotifier>(
       builder: (context, playlistNotifier, child) {
         final Player player = playlistNotifier.mediaPlayer;
 
@@ -80,7 +79,11 @@ class _PlaybarState extends State<Playbar> {
             colorScheme.surface,
           ),
           padding: const EdgeInsets.symmetric(horizontal: 16.0),
-          child: Row(
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: SizedBox(
+              width: (constraints.maxWidth - 32).clamp(528.0, double.infinity),
+              child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: <Widget>[
               // 左侧区
@@ -208,6 +211,18 @@ class _PlaybarState extends State<Playbar> {
                                 overflow: TextOverflow.ellipsis,
                                 maxLines: 1,
                               ),
+                              if (narrow) StreamBuilder<Duration>(
+                                stream: player.stream.position.throttleTime(
+                                  const Duration(milliseconds: 200),
+                                ),
+                                initialData: player.state.position,
+                                builder: (context, snapshot) => Text(
+                                  '${_formatDuration(snapshot.data ?? Duration.zero)} / ${_formatDuration(player.state.duration)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(color: onBarColor.withValues(alpha: 0.7), fontSize: 10),
+                                ),
+                              ),
                             ],
                           ),
                         ),
@@ -224,7 +239,9 @@ class _PlaybarState extends State<Playbar> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: <Widget>[
                     // 播放进度条
-                    SliderTheme(
+                    SizedBox(
+                      height: 18,
+                      child: SliderTheme(
                       data: SliderTheme.of(context).copyWith(
                         trackHeight: 2.0,
                         thumbShape: const RoundSliderThumbShape(
@@ -322,6 +339,7 @@ class _PlaybarState extends State<Playbar> {
                           );
                         },
                       ),
+                      ),
                     ),
                     // 播放控制按钮 (上一首、播放/暂停、下一首)
                     Row(
@@ -329,6 +347,7 @@ class _PlaybarState extends State<Playbar> {
                       children: <Widget>[
                         // 上一首按钮
                         IconButton(
+                          tooltip: '上一首',
                           icon: Icon(
                             Icons.skip_previous,
                             color: onBarColor,
@@ -342,17 +361,21 @@ class _PlaybarState extends State<Playbar> {
                           initialData: playlistNotifier.isPlaying,
                           builder: (context, snapshot) {
                             final isPlaying = snapshot.data ?? false;
-                            return PlayPauseButton(
+                            return Tooltip(
+                              message: isPlaying ? '暂停' : '播放',
+                              child: PlayPauseButton(
                               isPlaying: isPlaying,
                               color: accentColor,
                               onPressed: isPlaying
                                   ? playlistNotifier.pause
                                   : playlistNotifier.play,
+                              ),
                             );
                           },
                         ),
                         // 下一首按钮
                         IconButton(
+                          tooltip: '下一首',
                           icon: Icon(
                             Icons.skip_next,
                             color: onBarColor,
@@ -366,13 +389,12 @@ class _PlaybarState extends State<Playbar> {
                 ),
               ),
               // 右侧区
-              Expanded(
-                flex: 3,
-                child: Row(
+              Row(
+                  mainAxisSize: MainAxisSize.min,
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: <Widget>[
                     // 播放时间显示 (当前时间 / 总时长)
-                    StreamBuilder<Duration?>(
+                    if (!narrow) StreamBuilder<Duration?>(
                       stream: player.stream.position.throttleTime(
                         const Duration(milliseconds: 200),
                       ), // 监听当前位置
@@ -389,14 +411,19 @@ class _PlaybarState extends State<Playbar> {
                             final totalDuration =
                                 totalDurationSnapshot.data ?? Duration.zero;
                             return RepaintBoundary(
-                              child: Text(
-                                '${_formatDuration(currentPosition)} / ${_formatDuration(totalDuration)}',
-                                style: TextStyle(
-                                  color: onBarColor.withValues(alpha: 0.7),
-                                  fontSize: 12,
-                                  fontFeatures: const [
-                                    FontFeature.tabularFigures(),
-                                  ],
+                              child: ConstrainedBox(
+                                constraints: const BoxConstraints(maxWidth: 116),
+                                child: Text(
+                                  '${_formatDuration(currentPosition)} / ${_formatDuration(totalDuration)}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: onBarColor.withValues(alpha: 0.7),
+                                    fontSize: 12,
+                                    fontFeatures: const [
+                                      FontFeature.tabularFigures(),
+                                    ],
+                                  ),
                                 ),
                               ),
                             );
@@ -404,9 +431,9 @@ class _PlaybarState extends State<Playbar> {
                         );
                       },
                     ),
-                    const SizedBox(width: 8),
+                    if (!narrow) const SizedBox(width: 8),
                     // 随机播放/列表循环按钮 (根据 playMode 动态更新)
-                    if (!isNarrowScreen) ...[
+                    ...[
                       // 播放模式
                       Consumer<PlaylistContentNotifier>(
                         builder: (context, notifier, _) {
@@ -421,7 +448,13 @@ class _PlaybarState extends State<Playbar> {
                         },
                       ),
                       // 音量控制
-                      VolumeControl(player: player, iconColor: onBarColor),
+                      Tooltip(
+                        message: '音量',
+                        child: Semantics(
+                          label: '音量', button: true,
+                          child: VolumeControl(player: player, iconColor: onBarColor),
+                        ),
+                      ),
                       // // 平衡速率控制
                       BalanceRateControl(player: player, iconColor: onBarColor),
                       // 播放列表
@@ -457,12 +490,14 @@ class _PlaybarState extends State<Playbar> {
                     //   },
                     // ),
                   ],
-                ),
               ),
             ],
+              ),
+            ),
           ),
         );
       },
-    );
+      );
+    });
   }
 }

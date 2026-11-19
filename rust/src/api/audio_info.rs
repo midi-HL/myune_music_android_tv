@@ -62,6 +62,8 @@ fn read_tagged_file(path: &Path, options: &AudioInfoOptions) -> Result<TaggedFil
                 .read_cover_art(options.need_cover)
                 .read_properties(options.need_audio_props),
         )
+        .guess_file_type()
+        .map_err(|e| e.to_string())?
         .read()
         .map_err(|e| e.to_string())
 }

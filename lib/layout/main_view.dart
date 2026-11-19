@@ -214,26 +214,12 @@ class _MainViewState extends State<MainView> {
                         horizontal: 6,
                         vertical: 4,
                       ),
-                      child: MouseRegion(
-                        cursor: SystemMouseCursors.click,
-                        child: GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () => onSelect(i),
-                          child: TvFocusHighlight(
-                            autofocus: i == 0,
-                            debugLabel: 'tv-rail-${entries[i].routeName}',
-                            onActivate: () => onSelect(i),
-                            builder: (context, focused) => Tooltip(
-                              message: entries[i].label,
-                              child: _TvRailItem(
-                                entry: entries[i],
-                                selected: i == currentIndex,
-                                focused: focused,
-                                showLabel: showLabels,
-                              ),
-                            ),
-                          ),
-                        ),
+                      child: AndroidRailButton(
+                        entry: entries[i],
+                        selected: i == currentIndex,
+                        showLabel: showLabels,
+                        autofocus: i == 0,
+                        onSelect: () => onSelect(i),
                       ),
                     ),
                 ],
@@ -355,6 +341,49 @@ class _MainViewState extends State<MainView> {
       },
     );
   }
+}
+
+/// One keyboard focus node and one labelled accessibility button per entry.
+class AndroidRailButton extends StatelessWidget {
+  const AndroidRailButton({
+    required this.entry, required this.selected, required this.showLabel,
+    required this.onSelect, this.autofocus = false, this.focusNode, super.key,
+  });
+
+  final PageEntry entry;
+  final bool selected;
+  final bool showLabel;
+  final VoidCallback onSelect;
+  final bool autofocus;
+  final FocusNode? focusNode;
+
+  @override
+  Widget build(BuildContext context) => MouseRegion(
+    cursor: SystemMouseCursors.click,
+    child: GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      excludeFromSemantics: true,
+      onTap: onSelect,
+      child: TvFocusHighlight(
+        autofocus: autofocus,
+        focusNode: focusNode,
+        debugLabel: 'tv-rail-${entry.routeName}',
+        onActivate: onSelect,
+        builder: (context, focused) => Semantics(
+          container: true, button: true, label: entry.label,
+          selected: selected, focusable: true, focused: focused, onTap: onSelect,
+          excludeSemantics: true,
+          child: Tooltip(
+            message: entry.label,
+            child: _TvRailItem(
+              entry: entry, selected: selected, focused: focused,
+              showLabel: showLabel,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _TvRailItem extends StatelessWidget {

@@ -499,9 +499,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
       return p.basenameWithoutExtension(path);
     }
     final display = AndroidContentResolver.displayName(path, null);
-    return display.contains('.')
-        ? display.substring(0, display.lastIndexOf('.'))
-        : display;
+    return p.basenameWithoutExtension(display);
   }
 
   Future<String> _readableAudioPath(String path) async {
@@ -1050,31 +1048,25 @@ class PlaylistContentNotifier extends ChangeNotifier {
       );
     }
 
-    String title = _songDisplayName(filePath);
+    final isContentUri = AndroidContentResolver.isContentUri(filePath);
+    String title = isContentUri
+        ? p.basenameWithoutExtension(await AndroidContentResolver.loadDisplayName(filePath))
+        : _songDisplayName(filePath);
     String artist = '未知歌手';
     String album = '未知专辑';
     Duration? duration;
 
-    final isContentUri = AndroidContentResolver.isContentUri(filePath);
-    final normalizedPath = isContentUri
-        ? await AndroidContentResolver.cachePathForRead(filePath)
-        : Uri.file(filePath).toFilePath(windows: Platform.isWindows);
-    final file = File(normalizedPath);
-
-    if (!isContentUri && !await file.exists()) {
-      return Song(
-        title: title,
-        artist: '文件不存在 (解析失败)',
-        album: '未知专辑',
-        filePath: filePath,
-        albumArt: null,
-        duration: null,
-      );
-    }
-
     try {
+      final file = File(await _readableAudioPath(filePath));
+      if (!isContentUri && !await file.exists()) {
+        return Song(
+          title: title,
+          artist: '文件不存在 (解析失败)',
+          filePath: filePath,
+        );
+      }
       final metadata = await readAudioInfo(
-        path: normalizedPath,
+        path: file.path,
         options: const AudioInfoOptions(
           needCover: false,
           needLyrics: false,
@@ -1398,11 +1390,10 @@ class PlaylistContentNotifier extends ChangeNotifier {
   Future<void> _verifySongMetadataInBackground(
     Iterable<String> filePaths,
   ) async {
-    // 网络媒体的 filePath 是本机代理 URL，不能做本地 stat / readAudioInfo。
-    // 否则后台校验会把动态播放队列里的网络歌曲错误标记为「文件不存在」，
-    // 也会让封面 / 元数据缓存里出现一堆无效 URL key。
+    // SAF files are checked when the authorized folder is rescanned. The
+    // modification time of a temporary copy cannot verify the original file.
     final localPaths = filePaths
-        .where((path) => !RemoteMediaRegistry.isNetwork(path))
+        .where(canCheckAsLocalFile)
         .toList(growable: false);
     if (localPaths.isEmpty) return;
 
@@ -1415,10 +1406,18 @@ class PlaylistContentNotifier extends ChangeNotifier {
     for (final filePath in localPaths) {
       final cacheKey = _normalizePath(filePath);
       final cached = _songMetadataCache[cacheKey];
-      final normalizedPath = await _readableAudioPath(filePath);
-      final file = File(normalizedPath);
-
       try {
+        final normalizedPath = await _readableAudioPath(filePath);
+        final file = File(normalizedPath);
+        if (!await file.exists()) {
+          if (_songMetadataCache.remove(cacheKey) != null) {
+            _scheduleMetadataCacheSave();
+          }
+          changed |= _updateSongInCollections(
+            filePath, _markSongMissing, notify: false,
+          );
+          continue;
+        }
         final stat = await file.stat();
         final modifiedMs = stat.modified.millisecondsSinceEpoch;
 
@@ -1459,15 +1458,9 @@ class PlaylistContentNotifier extends ChangeNotifier {
         _scheduleMetadataCacheSave();
         changed |= _applyCachedMetadata(filePath, entry, notify: false);
         _coverlessPaths.remove(cacheKey);
-      } catch (e) {
-        if (_songMetadataCache.remove(cacheKey) != null) {
-          _scheduleMetadataCacheSave();
-        }
-        changed |= _updateSongInCollections(
-          filePath,
-          _markSongMissing,
-          notify: false,
-        );
+      } catch (_) {
+        // A tag parsing failure does not mean the file disappeared. Keep the
+        // previously displayed metadata until another scan can read the file.
       }
     }
 
