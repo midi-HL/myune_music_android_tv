@@ -20,14 +20,23 @@ void main() {
     addTearDown(input.dispose);
     addTearDown(below.dispose);
     addTearDown(controller.dispose);
-    await tester.pumpWidget(canvas(TvFocusScope(child: Stack(children: [
+    final fields = Stack(children: [
       Positioned(left: 100, top: 100, width: 200, child: TextField(
         focusNode: input, controller: controller,
       )),
       Positioned(left: 100, top: 250, child: Focus(
         focusNode: below, child: const SizedBox(width: 80, height: 40),
       )),
-    ]))));
+    ]);
+    // Control: the same field/node/controller and synthesized key without the
+    // TV wrapper must first demonstrate that Flutter can edit the caret.
+    await tester.pumpWidget(canvas(fields));
+    await tester.enterText(find.byType(TextField), 'abc');
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+    await tester.pump();
+    expect(controller.selection.baseOffset, 2, reason: 'bare TextField control');
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(canvas(TvFocusScope(child: fields)));
     await tester.pump(const Duration(milliseconds: 700));
     await tester.pump();
     await tester.enterText(find.byType(TextField), 'abc');

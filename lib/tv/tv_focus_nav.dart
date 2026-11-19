@@ -30,6 +30,18 @@ class TvDirectionalFocusIntent extends Intent {
 
 class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
   @override
+  bool isEnabled(TvDirectionalFocusIntent intent) {
+    final focus = FocusManager.instance.primaryFocus;
+    if (!TvFocusController.isEditableFocus(focus)) return true;
+    final vertical = intent.direction == TraversalDirection.up ||
+        intent.direction == TraversalDirection.down;
+    // Shortcuts only lets an ancestor handle the key when this Action is
+    // disabled. Returning KeyEventResult.ignored from invoke is insufficient:
+    // the default Action.toKeyEventResult ignores the invocation result.
+    return vertical && TvFocusController.isSingleLineEditableFocus(focus);
+  }
+
+  @override
   Object? invoke(TvDirectionalFocusIntent intent) {
     final manager = FocusManager.instance;
     final node = manager.primaryFocus;
@@ -48,8 +60,7 @@ class TvDirectionalFocusAction extends Action<TvDirectionalFocusIntent> {
       return KeyEventResult.handled;
     }
 
-    // 输入框的方向键由 EditableText 自己的 Shortcuts 处理光标移动，
-    // 这里必须明确放行，返回 null 会被 Shortcuts 当成 handled 吞掉按键。
+    // 输入场景由 isEnabled 让 Shortcuts 放行；这里保留直接调用时的防御。
     final vertical = intent.direction == TraversalDirection.up ||
         intent.direction == TraversalDirection.down;
     if (_isEditableFocus(node) &&
