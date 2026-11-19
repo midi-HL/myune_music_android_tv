@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import '../decryptor/qrc_decryptor.dart';
 import '../parser/parsed_models.dart';
 import '../parser/qrc_parser.dart';
+import 'lyric_song_match.dart';
 
 class QQMusicFetcher {
   static const _baseUrl = 'https://u.y.qq.com/cgi-bin/musicu.fcg';
@@ -159,8 +160,19 @@ class QQMusicFetcher {
       return score;
     }
 
-    final sortedSongs = songs.cast<Map<String, dynamic>>().toList()
+    final sortedSongs = songs.whereType<Map<String, dynamic>>().where((song) {
+      final singers = song['singer'];
+      return matchesLyricSong(
+        title: title,
+        artist: artist,
+        candidateTitles: [song['title'], song['name']].whereType<String>(),
+        candidateArtists: singers is List
+            ? singers.whereType<Map>().map((item) => item['name']).whereType<String>()
+            : const <String>[],
+      );
+    }).toList()
       ..sort((a, b) => scoreSong(b).compareTo(scoreSong(a)));
+    if (sortedSongs.isEmpty) return null;
     final first = sortedSongs.first;
 
     final singers = first['singer'] as List<dynamic>? ?? [];

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
-import 'dart:io';
 import 'package:provider/provider.dart';
 
 import '../page/pages/play_list.dart';
@@ -173,7 +172,7 @@ class _MainViewState extends State<MainView> {
     );
   }
 
-  // 非 TV 沿用 NavigationRail；TV 上换成每项都有显式 Focus 节点的侧边栏，
+  // 桌面沿用 NavigationRail；Android 上为侧边栏每项设置显式 Focus 节点，
   // 第一项 autofocus，保证冷启动时方向键有起点。
   Widget _buildRail({
     required List<PageEntry> entries,
@@ -181,7 +180,7 @@ class _MainViewState extends State<MainView> {
     required ValueChanged<int> onSelect,
     required Color railColor,
   }) {
-    if (!Platform.isAndroid) {
+    if (defaultTargetPlatform != TargetPlatform.android) {
       return SafeArea(
         child: NavigationRail(
           backgroundColor: railColor,
@@ -272,32 +271,38 @@ class _MainViewState extends State<MainView> {
     );
 
     Widget buildNavigator(bool instant) {
-      return Navigator(
-        key: navigationNotifier.navigatorKey,
-        onGenerateRoute: (routeSettings) {
-          final entry = visibleEntries.firstWhere(
-            (e) => e.routeName == routeSettings.name,
-            orElse: () => visibleEntries.first,
-          );
-          return PageRouteBuilder(
-            pageBuilder: (context, _, __) => entry.page,
-            transitionDuration: instant
-                ? Duration.zero
-                : const Duration(milliseconds: 150),
-            reverseTransitionDuration: instant
-                ? Duration.zero
-                : const Duration(milliseconds: 150),
-            transitionsBuilder: (context, animation, secondaryAnimation, child) {
-              if (instant) return child;
-              final curved = CurvedAnimation(
-                parent: animation,
-                curve: Curves.easeInOut,
-                reverseCurve: Curves.easeInOut,
-              );
-              return FadeTransition(opacity: curved, child: child);
-            },
-          );
-        },
+      // The nested route's transparent modal barrier must only block
+      // previous content inside this Navigator, not the adjacent sidebar.
+      return Semantics(
+        container: true,
+        explicitChildNodes: true,
+        child: Navigator(
+          key: navigationNotifier.navigatorKey,
+          onGenerateRoute: (routeSettings) {
+            final entry = visibleEntries.firstWhere(
+              (e) => e.routeName == routeSettings.name,
+              orElse: () => visibleEntries.first,
+            );
+            return PageRouteBuilder(
+              pageBuilder: (context, _, __) => entry.page,
+              transitionDuration: instant
+                  ? Duration.zero
+                  : const Duration(milliseconds: 150),
+              reverseTransitionDuration: instant
+                  ? Duration.zero
+                  : const Duration(milliseconds: 150),
+              transitionsBuilder: (context, animation, secondaryAnimation, child) {
+                if (instant) return child;
+                final curved = CurvedAnimation(
+                  parent: animation,
+                  curve: Curves.easeInOut,
+                  reverseCurve: Curves.easeInOut,
+                );
+                return FadeTransition(opacity: curved, child: child);
+              },
+            );
+          },
+        ),
       );
     }
 

@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../decryptor/eapi_decryptor.dart';
 import '../parser/parsed_models.dart';
 import '../parser/yrc_parser.dart';
+import 'lyric_song_match.dart';
 
 class NeteaseFetcher {
   static const _baseUrl = 'https://music.163.com';
@@ -94,8 +95,19 @@ class NeteaseFetcher {
         return score;
       }
 
-      final sortedSongs = songs.cast<Map<String, dynamic>>().toList()
+      final sortedSongs = songs.whereType<Map<String, dynamic>>().where((song) {
+        final artists = song['ar'];
+        return matchesLyricSong(
+          title: title,
+          artist: artist,
+          candidateTitles: [song['name']].whereType<String>(),
+          candidateArtists: artists is List
+              ? artists.whereType<Map>().map((item) => item['name']).whereType<String>()
+              : const <String>[],
+        );
+      }).toList()
         ..sort((a, b) => scoreSong(b).compareTo(scoreSong(a)));
+      if (sortedSongs.isEmpty) return null;
       final first = sortedSongs.first;
 
       final artists = first['ar'] as List<dynamic>? ?? [];

@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import '../decryptor/krc_decryptor.dart';
 import '../parser/krc_parser.dart';
 import '../parser/parsed_models.dart';
+import 'lyric_song_match.dart';
 
 class KugouFetcher {
   // 签名密钥（来自 LDDC-Android）
@@ -111,8 +112,16 @@ class KugouFetcher {
         return score;
       }
 
-      final sortedSongs = songs.cast<Map<String, dynamic>>().toList()
+      final sortedSongs = songs.whereType<Map<String, dynamic>>().where((song) {
+        return matchesLyricSong(
+          title: title,
+          artist: artist,
+          candidateTitles: [song['songname']].whereType<String>(),
+          candidateArtists: [song['singername']].whereType<String>(),
+        );
+      }).toList()
         ..sort((a, b) => scoreSong(b).compareTo(scoreSong(a)));
+      if (sortedSongs.isEmpty) return null;
       final selected = sortedSongs.first;
 
       return {

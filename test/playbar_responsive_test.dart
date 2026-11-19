@@ -1,5 +1,6 @@
-import 'dart:ui' show SemanticsFlag;
+import 'dart:ui' show SemanticsAction, SemanticsFlag;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:myune_music/layout/main_view.dart';
+import 'package:myune_music/layout/navigation_notifier.dart';
 import 'package:myune_music/page/playlist/playlist_content_notifier.dart';
 import 'package:myune_music/page/playlist/playlist_models.dart';
 import 'package:myune_music/page/setting/settings_provider.dart';
@@ -46,6 +48,28 @@ class _Playback extends ChangeNotifier implements PlaylistContentNotifier {
   double get volume => 50;
   @override
   List<LyricLine> get currentLyrics => const [];
+  @override
+  Stream<int> get lyricLineIndexStream => const Stream.empty();
+  @override
+  int get currentLyricLineIndex => -1;
+  @override
+  List<Playlist> get playlists => const [];
+  @override
+  bool get isSearching => false;
+  @override
+  bool get isMultiSelectMode => false;
+  @override
+  bool get isWritingReplayGain => false;
+  @override
+  bool get isLoadingSongs => false;
+  @override
+  int get selectedIndex => -1;
+  @override
+  List<Song> get currentPlaylistSongs => const [];
+  @override
+  List<Song> get selectedSongs => const [];
+  @override
+  Set<String> get selectedSongPaths => const {};
   @override
   Duration get currentPosition => Duration.zero;
   @override
@@ -162,7 +186,7 @@ void main() {
       ));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      for (final label in ['上一首', '播放', '下一首', '列表循环', '音量', '音效设置', '播放列表']) {
+      for (final label in ['打开播放页', '上一首', '播放', '下一首', '列表循环', '音量', '音效设置', '播放列表']) {
         final target = find.byTooltip(label);
         expect(target, findsOneWidget);
         expect(target.hitTestable(), findsOneWidget, reason: '$label can receive pointer/remote focus');
@@ -176,12 +200,47 @@ void main() {
         final data = node.getSemanticsData();
         return data.tooltip == '播放列表' && data.hasFlag(SemanticsFlag.isButton);
       }), findsOneWidget);
+      final cover = find.bySemanticsLabel('打开播放页');
+      expect(cover, findsOneWidget);
+      final coverData = tester.getSemantics(cover).getSemanticsData();
+      expect(coverData.hasFlag(SemanticsFlag.isButton), isTrue);
+      expect(coverData.hasAction(SemanticsAction.tap), isTrue);
       await tester.pumpWidget(const SizedBox.shrink());
       semantics.dispose();
       settings.dispose();
       playback.dispose();
     });
   }
+
+  testWidgets('sidebar and page semantics survive the nested Navigator', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final settings = SettingsProvider();
+    await settings.initializationFuture;
+    final playback = _Playback();
+    final navigation = NavigationNotifier();
+    final semantics = tester.ensureSemantics();
+    addTearDown(settings.dispose);
+    addTearDown(playback.dispose);
+    addTearDown(navigation.dispose);
+    addTearDown(semantics.dispose);
+    await tester.pumpWidget(MultiProvider(
+      providers: [
+        ChangeNotifierProvider<SettingsProvider>.value(value: settings),
+        ChangeNotifierProvider<PlaylistContentNotifier>.value(value: playback),
+        ChangeNotifierProvider<NavigationNotifier>.value(value: navigation),
+      ],
+      child: const MaterialApp(home: MainView()),
+    ));
+    await tester.pumpAndSettle();
+    final first = find.bySemanticsLabel('歌单');
+    expect(first, findsOneWidget);
+    expect(find.bySemanticsLabel('设置'), findsOneWidget);
+    expect(find.bySemanticsLabel('请选择一个歌单'), findsOneWidget);
+    final firstData = tester.getSemantics(first).getSemanticsData();
+    expect(firstData.hasFlag(SemanticsFlag.isFocused), isTrue);
+    expect(firstData.hasFlag(SemanticsFlag.isSelected), isTrue);
+    await tester.pumpWidget(const SizedBox.shrink());
+  }, variant: TargetPlatformVariant({TargetPlatform.android}));
 
   testWidgets('icon-only Android rail exports labelled focused button semantics', (tester) async {
     final node = FocusNode();

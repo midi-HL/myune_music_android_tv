@@ -96,87 +96,95 @@ class _PlaybarState extends State<Playbar> {
                     return Row(
                       children: <Widget>[
                         // 专辑封面点击跳转歌曲详情页
-                        FilledButton(
-                          onPressed: (currentSong != null && !widget.disableTap)
-                              ? () {
-                                  // 如果有歌曲在播放且点击未被禁用，则执行跳转
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const SongDetailPage(),
-                                    ),
+                        Tooltip(
+                          message: '打开播放页',
+                          excludeFromSemantics: true,
+                          child: FilledButton(
+                            onPressed: (currentSong != null && !widget.disableTap)
+                                ? () {
+                                    // 如果有歌曲在播放且点击未被禁用，则执行跳转
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (context) =>
+                                            const SongDetailPage(),
+                                      ),
+                                    );
+                                  }
+                                : null,
+                            style: ButtonStyle(
+                              fixedSize: WidgetStateProperty.all(
+                                const Size(50, 50),
+                              ),
+                              // TV 遥控器焦点落到封面时给出原生式背景高亮：
+                              // 只改变背景色 / overlay，不画任何描边框。
+                              backgroundColor:
+                                  WidgetStateProperty.resolveWith<Color>((
+                                Set<WidgetState> states,
+                              ) {
+                                final base = colorScheme.surfaceContainerHighest;
+                                if (states.contains(WidgetState.focused)) {
+                                  return Color.lerp(
+                                        base,
+                                        colorScheme.primary,
+                                        0.32,
+                                      )!;
+                                }
+                                return base;
+                              }),
+                              overlayColor:
+                                  WidgetStateProperty.resolveWith<Color?>((
+                                Set<WidgetState> states,
+                              ) {
+                                if (states.contains(WidgetState.focused)) {
+                                  return colorScheme.primary.withValues(
+                                    alpha: 0.18,
                                   );
                                 }
-                              : null,
-                          style: ButtonStyle(
-                            fixedSize: WidgetStateProperty.all(
-                              const Size(50, 50),
+                                return null;
+                              }),
+                              minimumSize: WidgetStateProperty.all(
+                                const Size(50, 50),
+                              ),
+                              padding: WidgetStateProperty.all(
+                                EdgeInsets.zero,
+                              ), // 去除内边距
+                              shape: WidgetStateProperty.all(
+                                RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                              ),
+                              elevation: WidgetStateProperty.all(4),
                             ),
-                            // TV 遥控器焦点落到封面时给出原生式背景高亮：
-                            // 只改变背景色 / overlay，不画任何描边框。
-                            backgroundColor:
-                                WidgetStateProperty.resolveWith<Color>((
-                              Set<WidgetState> states,
-                            ) {
-                              final base = colorScheme.surfaceContainerHighest;
-                              if (states.contains(WidgetState.focused)) {
-                                return Color.lerp(
-                                      base,
-                                      colorScheme.primary,
-                                      0.32,
-                                    )!;
-                              }
-                              return base;
-                            }),
-                            overlayColor:
-                                WidgetStateProperty.resolveWith<Color?>((
-                              Set<WidgetState> states,
-                            ) {
-                              if (states.contains(WidgetState.focused)) {
-                                return colorScheme.primary.withValues(
-                                  alpha: 0.18,
-                                );
-                              }
-                              return null;
-                            }),
-                            minimumSize: WidgetStateProperty.all(
-                              const Size(50, 50),
-                            ),
-                            padding: WidgetStateProperty.all(
-                              EdgeInsets.zero,
-                            ), // 去除内边距
-                            shape: WidgetStateProperty.all(
-                              RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(4),
+                            child: Semantics(
+                              label: '打开播放页',
+                              excludeSemantics: true,
+                              child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child:
+                                      (currentSong?.albumArt != null &&
+                                          currentSong!.albumArt!.isNotEmpty)
+                                      ? Image.memory(
+                                          currentSong.albumArt!,
+                                          fit: BoxFit.cover,
+                                          width: 50,
+                                          height: 50,
+                                          errorBuilder: (context, error, stackTrace) {
+                                            return Icon(
+                                              Icons.music_note,
+                                              color: onBarColor.withValues(
+                                                alpha: 0.7,
+                                              ),
+                                              size: 30,
+                                            );
+                                          },
+                                        )
+                                      : Icon(
+                                          Icons.music_note,
+                                          color: onBarColor.withValues(alpha: 0.7),
+                                          size: 30,
+                                        ),
                               ),
                             ),
-                            elevation: WidgetStateProperty.all(4),
-                          ),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(4),
-                            child:
-                                (currentSong?.albumArt != null &&
-                                    currentSong!.albumArt!.isNotEmpty)
-                                ? Image.memory(
-                                    currentSong.albumArt!,
-                                    fit: BoxFit.cover,
-                                    width: 50,
-                                    height: 50,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return Icon(
-                                        Icons.music_note,
-                                        color: onBarColor.withValues(
-                                          alpha: 0.7,
-                                        ),
-                                        size: 30,
-                                      );
-                                    },
-                                  )
-                                : Icon(
-                                    Icons.music_note,
-                                    color: onBarColor.withValues(alpha: 0.7),
-                                    size: 30,
-                                  ),
                           ),
                         ),
                         const SizedBox(width: 8),
