@@ -542,6 +542,9 @@ class _AddPlaylistDialogState extends State<AddPlaylistDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Focus(
+              // Observe the field without entering the TV traversal order.
+              canRequestFocus: false,
+              skipTraversal: true,
               onFocusChange: (hasFocus) {
                 widget.notifier.setDisableHotKeys(hasFocus);
               },
@@ -648,6 +651,8 @@ class _EditPlaylistDialogState extends State<_EditPlaylistDialog> {
     return AlertDialog(
       title: const Text('编辑歌单名称'),
       content: Focus(
+        canRequestFocus: false,
+        skipTraversal: true,
         onFocusChange: (hasFocus) {
           widget.notifier.setDisableHotKeys(hasFocus);
         },
