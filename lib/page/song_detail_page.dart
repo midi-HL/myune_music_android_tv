@@ -49,7 +49,22 @@ class _PlayPageArrowAction extends Action<_PlayPageArrowIntent> {
       return KeyEventResult.ignored;
     }
     // 左右只在控制栏按钮行内移动；上下保持不动，永不离开这一行。
-    TvFocusController.instance.stepWithinScopedRow(intent.direction, _inPlaybar);
+    final moved = TvFocusController.instance.stepWithinScopedRow(
+      intent.direction, _inPlaybar,
+    );
+    if (moved && (intent.direction == TraversalDirection.left ||
+        intent.direction == TraversalDirection.right)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final target = FocusManager.instance.primaryFocus?.context;
+        if (target != null && target.mounted && _inPlaybar(target)) {
+          Scrollable.ensureVisible(
+            target,
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
     return KeyEventResult.handled;
   }
 }
@@ -655,13 +670,27 @@ class _SongDetailPageState extends State<SongDetailPage> {
                             ),
                           ],
                         )
-                      : // 横屏：保留原有布局
-                        Row(
+                      : LayoutBuilder(builder: (context, constraints) {
+                        final width = constraints.maxWidth;
+                        // Give the controls their touch width when the lyrics
+                        // can still use at least half of the horizontal space.
+                        final preferredInset = 80 * scale;
+                        final controlWidth = Playbar.minimumControlsWidth(scale);
+                        final inset = math.min(
+                          preferredInset,
+                          math.max(0.0, width * 0.54 - controlWidth),
+                        );
+                        final available = width - inset;
+                        final playerWidth = math.min(
+                          width * 0.54,
+                          math.max(available * 0.4, controlWidth),
+                        );
+                        return Row(
                           children: [
-                            SizedBox(width: 80 * scale),
+                            SizedBox(width: inset),
                             // 左侧歌曲信息和播放控制区域
-                            Expanded(
-                              flex: 2,
+                            SizedBox(
+                              width: playerWidth,
                               child: Padding(
                                 padding: EdgeInsets.only(
                                   top: 10 * scale,
@@ -965,11 +994,10 @@ class _SongDetailPageState extends State<SongDetailPage> {
                             ),
                             // 歌词区域
                             Expanded(
-                              flex: 3,
                               child: Padding(
                                 padding: EdgeInsets.only(
-                                  left: 80 * scale,
-                                  right: 80 * scale,
+                                  left: math.min(preferredInset, width * 0.1),
+                                  right: math.min(preferredInset, width * 0.1),
                                   top: 20 * scale,
                                   bottom: 40 * scale,
                                 ),
@@ -1020,7 +1048,8 @@ class _SongDetailPageState extends State<SongDetailPage> {
                               ),
                             ),
                           ],
-                        ),
+                        );
+                      }),
                 ),
               ],
             ),

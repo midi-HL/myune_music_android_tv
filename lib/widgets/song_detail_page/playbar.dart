@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:provider/provider.dart';
@@ -40,6 +42,13 @@ Widget buildLyricsSettingsButton(
 
 class Playbar extends StatefulWidget {
   const Playbar({super.key});
+
+  static double minimumControlsWidth(double scale) {
+    // IconButton reserves a 48dp target, and larger icons need their padding.
+    return const [28, 36, 28, 24, 24, 24, 23, 23].fold(
+      0.0, (total, size) => total + math.max(48.0, size * scale + 16.0),
+    );
+  }
 
   @override
   State<Playbar> createState() => _PlaybarState();
@@ -199,8 +208,9 @@ class _PlaybarState extends State<Playbar> {
             ),
             SizedBox(height: 4 * scale),
             // 播放控制按钮
-            Row(
-              mainAxisAlignment:
+            LayoutBuilder(builder: (context, constraints) {
+              final controls = Row(
+                mainAxisAlignment:
                   MainAxisAlignment.spaceBetween, // 使左右两边的内容分别对齐到两端
               children: [
                 // 左侧
@@ -294,7 +304,14 @@ class _PlaybarState extends State<Playbar> {
                   ],
                 ),
               ],
-            ),
+              );
+              final minWidth = Playbar.minimumControlsWidth(scale);
+              if (constraints.maxWidth >= minWidth) return controls;
+              return SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(width: minWidth, child: controls),
+              );
+            }),
           ],
         );
       },

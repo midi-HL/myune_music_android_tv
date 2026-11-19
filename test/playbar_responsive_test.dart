@@ -1,6 +1,7 @@
 import 'dart:ui' show SemanticsFlag;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mpv_audio_kit/mpv_audio_kit.dart';
 import 'package:provider/provider.dart';
@@ -9,7 +10,10 @@ import 'package:myune_music/layout/main_view.dart';
 import 'package:myune_music/page/playlist/playlist_content_notifier.dart';
 import 'package:myune_music/page/playlist/playlist_models.dart';
 import 'package:myune_music/page/setting/settings_provider.dart';
+import 'package:myune_music/page/song_detail_page.dart';
+import 'package:myune_music/tv/tv_focus_nav.dart';
 import 'package:myune_music/widgets/playbar.dart';
+import 'package:myune_music/widgets/ui_scale_scope.dart';
 
 class _PlayerStreams implements PlayerStream {
   @override
@@ -41,6 +45,8 @@ class _Playback extends ChangeNotifier implements PlaylistContentNotifier {
   @override
   double get volume => 50;
   @override
+  List<LyricLine> get currentLyrics => const [];
+  @override
   Duration get currentPosition => Duration.zero;
   @override
   Duration get totalDuration => const Duration(minutes: 4);
@@ -55,6 +61,74 @@ class _Playback extends ChangeNotifier implements PlaylistContentNotifier {
 }
 
 void main() {
+  for (final physicalWidth in [1280.0, 920.0]) {
+    testWidgets('fullscreen lyrics settings opens at ${physicalWidth.toInt()}px', (tester) async {
+      const scale = 0.7;
+      tester.view.physicalSize = Size(physicalWidth, 720);
+      tester.view.devicePixelRatio = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      SharedPreferences.setMockInitialValues({'autoHidePlayPageComponents': false});
+      final settings = SettingsProvider();
+      await settings.initializationFuture;
+      final playback = _Playback();
+      addTearDown(settings.dispose);
+      addTearDown(playback.dispose);
+      await tester.pumpWidget(MultiProvider(
+        providers: [
+          ChangeNotifierProvider<SettingsProvider>.value(value: settings),
+          ChangeNotifierProvider<PlaylistContentNotifier>.value(value: playback),
+        ],
+        child: MaterialApp(
+          builder: (context, child) => TvFocusScope(
+            child: LayoutBuilder(builder: (context, constraints) {
+              final width = constraints.maxWidth / scale;
+              final height = constraints.maxHeight / scale;
+              return ClipRect(child: OverflowBox(
+                alignment: Alignment.topLeft,
+                minWidth: width, maxWidth: width,
+                minHeight: height, maxHeight: height,
+                child: UiScaleScope(
+                  visualScale: scale,
+                  child: Transform.scale(
+                    scale: scale, alignment: Alignment.topLeft,
+                    child: SizedBox(width: width, height: height, child: child!),
+                  ),
+                ),
+              ));
+            }),
+          ),
+          home: const SongDetailPage(),
+        ),
+      ));
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+      final button = find.byTooltip('歌词显示设置');
+      expect(button, findsOneWidget);
+      final scaffold = tester.state<ScaffoldState>(find.byType(Scaffold));
+      expect(scaffold.isDrawerOpen, isFalse);
+      if (physicalWidth == 1280) {
+        expect(button.hitTestable(), findsOneWidget);
+        await tester.tap(button);
+      } else {
+        // Enter the control row and navigate across the clipped viewport.
+        // Each Right must scroll the newly focused button into reach.
+        for (var step = 0; step < 8; step++) {
+          await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+          await tester.pumpAndSettle();
+        }
+        expect(button.hitTestable(), findsOneWidget);
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      }
+      await tester.pumpAndSettle();
+      expect(scaffold.isDrawerOpen, isTrue);
+      expect(find.text('歌词选择'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   for (final scale in [0.7, 1.0]) {
     testWidgets('640 logical width keeps every playback action visible at scale $scale', (tester) async {
       tester.view.physicalSize = const Size(1280, 720);
