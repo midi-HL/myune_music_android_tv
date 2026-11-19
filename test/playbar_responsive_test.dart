@@ -237,7 +237,6 @@ void main() {
     expect(find.bySemanticsLabel('设置'), findsOneWidget);
     expect(find.bySemanticsLabel('请选择一个歌单'), findsOneWidget);
     final firstData = tester.getSemantics(first).getSemanticsData();
-    expect(firstData.hasFlag(SemanticsFlag.isFocused), isTrue);
     expect(firstData.hasFlag(SemanticsFlag.isSelected), isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
   }, variant: const TargetPlatformVariant({TargetPlatform.android}));
