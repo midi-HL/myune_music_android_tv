@@ -20,6 +20,7 @@ import 'playlist_models.dart';
 import 'playlist_manager.dart';
 import 'song_cover_store.dart';
 import 'playback_queue_logic.dart';
+import 'network_favorite_sync.dart';
 import '../../utils/latest_operation.dart';
 
 import '../setting/settings_provider.dart';
@@ -33,6 +34,7 @@ import '../../services/notification_service.dart';
 import '../../services/android_content_resolver.dart';
 import '../../services/network/remote_media_registry.dart';
 import '../../utils/search_debouncer.dart';
+import '../../utils/artist_separator_logic.dart';
 import '../../lyrics/lyric_source.dart';
 import '../../lyrics/lyrics_handler.dart';
 
@@ -948,10 +950,13 @@ class PlaylistContentNotifier extends ChangeNotifier {
     }
   }
 
+  String _playingIdentity(String path) => RemoteMediaRegistry.isNetwork(path)
+      ? RemoteMediaRegistry.identityOf(path) : _pathKey(path);
+
   void _reconcilePlayingCursor() {
     if (_playbackPreparing || _isUsingQueue || _currentSong == null || _playingPlaylist == null) return;
     final paths = _playingPlaylist!.songFilePaths;
-    final next = reconcilePlayingIndex(paths, _currentSong!.filePath, _playingSongIndex);
+    final next = reconcilePlayingIndex(paths, _currentSong!.filePath, _playingSongIndex, identityOf: _playingIdentity);
     if (next == _playingSongIndex) return;
     _playingSongIndex = next;
     if (_playMode == PlayMode.shuffle) _generateShuffledIndices(count: paths.length);
@@ -960,6 +965,9 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   Future<void> _savePlaylists() async {
     _reconcilePlayingCursor();
+    for (final playlist in _playlists.where((item) => item.isDefault)) {
+      await syncNetworkDriveFavorites(playlist);
+    }
     await _playlistManager.savePlaylists(_playlists);
   }
 
@@ -2143,11 +2151,11 @@ class PlaylistContentNotifier extends ChangeNotifier {
     final index = _isUsingQueue ? _currentQueueIndex : _playingSongIndex;
     if (index >= 0 &&
         index < queue.length &&
-        queue[index].filePath == song.filePath) {
+        _playingIdentity(queue[index].filePath) == _playingIdentity(song.filePath)) {
       return index;
     }
 
-    return queue.indexWhere((queueSong) => queueSong.filePath == song.filePath);
+    return queue.indexWhere((queueSong) => _playingIdentity(queueSong.filePath) == _playingIdentity(song.filePath));
   }
 
   // 获取当前播放队列的歌曲列表
@@ -2728,49 +2736,12 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   /// 计算下一首的索引（不修改状态），供 _handleGaplessTransition 使用
   int _peekNextIndex() {
-    if (_isUsingQueue &&
-        _currentPlayingQueue != null &&
-        _currentPlayingQueue!.isNotEmpty) {
-      final songCount = _currentPlayingQueue!.length;
-      final currentIndex = _currentQueueIndex;
-
-      if (_playMode == PlayMode.shuffle) {
-        if (_shuffledIndices.length != songCount) {
-          return (currentIndex + 1) % songCount;
-        }
-        final int pos = _shuffledIndices.indexOf(currentIndex);
-        if (pos == -1 || pos == _shuffledIndices.length - 1) {
-          return _shuffledIndices.isNotEmpty ? _shuffledIndices[0] : 0;
-        }
-        return _shuffledIndices[pos + 1];
-      } else if (_playMode == PlayMode.repeatOne) {
-        return currentIndex;
-      } else {
-        return (currentIndex + 1) % songCount;
-      }
-    }
-
-    // 歌单模式
-    if (_playingPlaylist == null || _playingPlaylist!.songFilePaths.isEmpty) {
-      return 0;
-    }
-    final songCount = _playingPlaylist!.songFilePaths.length;
-    final currentIndex = _playingSongIndex;
-
-    if (_playMode == PlayMode.shuffle) {
-      if (_shuffledIndices.length != songCount) {
-        return (currentIndex + 1) % songCount;
-      }
-      final int pos = _shuffledIndices.indexOf(currentIndex);
-      if (pos == -1 || pos == _shuffledIndices.length - 1) {
-        return _shuffledIndices.isNotEmpty ? _shuffledIndices[0] : 0;
-      }
-      return _shuffledIndices[pos + 1];
-    } else if (_playMode == PlayMode.repeatOne) {
-      return currentIndex;
-    } else {
-      return (currentIndex + 1) % songCount;
-    }
+    final paths = _isUsingQueue ? _currentPlayingQueueFilePaths : _playingPlaylist?.songFilePaths;
+    return nextGaplessIndex(
+      _isUsingQueue ? _currentQueueIndex : _playingSongIndex, paths?.length ?? 0,
+      shuffleOrder: _playMode == PlayMode.shuffle ? _shuffledIndices : null,
+      repeatOne: _playMode == PlayMode.repeatOne,
+    );
   }
 
   void updateGaplessMode(bool enabled) {
@@ -2802,6 +2773,20 @@ class PlaylistContentNotifier extends ChangeNotifier {
       return;
     }
     final path = paths[nextIndex];
+    final previousIndex = _isUsingQueue ? _currentQueueIndex : _playingSongIndex;
+    final startsNewShuffleCycle = _playMode == PlayMode.shuffle &&
+        _shuffledIndices.isNotEmpty &&
+        _shuffledIndices.indexOf(previousIndex) == _shuffledIndices.length - 1;
+    if (startsNewShuffleCycle) {
+      _generateShuffledIndices(count: paths.length);
+      _shuffledIndices.remove(nextIndex);
+      _shuffledIndices.insert(0, nextIndex);
+    }
+    // mpv has already switched to this item. Advance the logical cursor before
+    // waiting for metadata so a manual NEXT now advances from B to C, not A to B.
+    final usedQueue = _isUsingQueue;
+    if (usedQueue) { _currentQueueIndex = nextIndex; }
+    else { _playingSongIndex = nextIndex; }
     try {
       await _playbackOperation.run(request, (isCurrent) async {
         bool active() => !_disposed && isCurrent();
@@ -2812,8 +2797,6 @@ class PlaylistContentNotifier extends ChangeNotifier {
           artwork: _sessionArtwork(song.albumArt), autoApplyPlaylistNavigation: false,
         ));
         if (!active()) return;
-        if (_isUsingQueue) { _currentQueueIndex = nextIndex; }
-        else { _playingSongIndex = nextIndex; }
         final oldPath = _currentSong?.normalizedPath;
         _currentSong = song;
         _evictableCoverPaths.remove(song.normalizedPath);
@@ -2822,7 +2805,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
           _scheduleCoverEviction();
         }
         _lyricsHandler.clearLyrics();
-        unawaited(_lyricsHandler.loadLyricsForSong(path));
+        unawaited(_lyricsHandler.loadLyricsForSong(song.filePath));
         unawaited(extractAndApplyDynamicColor(song.albumArt));
         PlaybackTracker().startTracking(song);
         await _audioService.removeFirst();
@@ -3157,7 +3140,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
     for (final song in playable) {
       // 检查歌曲是否已经在队列中
-      if (!_currentPlayingQueue!.any((s) => s.filePath == song.filePath)) {
+      if (!_currentPlayingQueue!.any((s) => _playingIdentity(s.filePath) == _playingIdentity(song.filePath))) {
         // 将歌曲添加到队列的末尾
         _currentPlayingQueue!.add(song);
         _currentPlayingQueueFilePaths!.add(song.filePath);
@@ -3214,7 +3197,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
     song = RemoteMediaRegistry.normalizeSong(song);
     final edit = moveQueueItemNext<Song>(
-      _currentPlayingQueue!, _currentQueueIndex, song, (item) => item.filePath,
+      _currentPlayingQueue!, _currentQueueIndex, song, (item) => _playingIdentity(item.filePath),
     );
     if (!edit.changed) {
       _notificationService.info('这首歌曲正在播放');
@@ -3336,7 +3319,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
           _scheduleCoverEviction();
         }
         _lyricsHandler.clearLyrics();
-        unawaited(_lyricsHandler.loadLyricsForSong(songFilePath));
+        unawaited(_lyricsHandler.loadLyricsForSong(songToPlay.filePath));
         unawaited(extractAndApplyDynamicColor(songToPlay.albumArt));
         PlaybackTracker().startTracking(songToPlay);
         if (!_playbackIntent.playRequested) PlaybackTracker().pauseTracking();
@@ -3555,7 +3538,7 @@ class PlaylistContentNotifier extends ChangeNotifier {
         } else if (_playMode == PlayMode.shuffle) {
           _generateShuffledIndices(count: paths.length);
         }
-        unawaited(_lyricsHandler.loadLyricsForSong(path));
+        unawaited(_lyricsHandler.loadLyricsForSong(song.filePath));
         unawaited(extractAndApplyDynamicColor(song.albumArt));
         PlaybackTracker().startTracking(song);
         if (!_playbackIntent.playRequested) PlaybackTracker().pauseTracking();
@@ -4637,35 +4620,8 @@ class PlaylistContentNotifier extends ChangeNotifier {
 
   // 根据设置的自定义分隔符，将歌手字符串拆分为独立歌手
   List<String> getIndividualArtists(String artistString) {
-    if (artistString.isEmpty) {
-      return ['未知歌手'];
-    }
-
-    final separators = _settingsProvider.artistSeparators;
-    final validSeparators = separators
-        .where(
-          (separator) => separator.isNotEmpty && separator.trim().isNotEmpty,
-        )
-        .toList();
-
-    if (validSeparators.isEmpty) {
-      return [artistString];
-    }
-
-    final pattern = validSeparators.map((s) => RegExp.escape(s)).join('|');
-    final RegExp separatorRegExp = RegExp('[$pattern]');
-
-    final individualArtists = artistString
-        .split(separatorRegExp)
-        .map((artist) => artist.trim())
-        .where((artist) => artist.isNotEmpty)
-        .toList();
-
-    if (individualArtists.isEmpty) {
-      return [artistString];
-    }
-
-    return individualArtists;
+    final artists = splitArtistNames(artistString, _settingsProvider.artistSeparators);
+    return artists.isEmpty ? ['未知歌手'] : artists;
   }
 
   // 多歌手识别与分组

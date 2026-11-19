@@ -29,6 +29,17 @@ class NetworkLibraryStore {
 
   List<Song> get favorites => List<Song>.unmodifiable(_favorites);
 
+  /// Provider selection key for a retained network page. Progress/volume
+  /// notifications must not redraw the directory, but favorite changes must.
+  static String playlistSignature(Iterable<Playlist> playlists) {
+    final keys = playlists.where((playlist) => playlist.isDefault)
+        .expand((playlist) => playlist.songFilePaths)
+        .map(RemoteMediaRegistry.identityOf)
+        .where((key) => key.startsWith('nas:') || key.startsWith('gd:'))
+        .toSet().toList()..sort();
+    return jsonEncode(keys);
+  }
+
   /// 只接受网络硬盘媒体（WebDAV / FTP / 只读 Google Drive），
   /// 排除哔哩哔哩与本地文件。
   static bool isNetworkDrive(Song song) {

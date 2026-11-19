@@ -30,6 +30,7 @@ class TvBackHandler {
 
   static void openQueue() {
     if (TvFocusNavigatorObserver.currentRoute is PopupRoute) return;
+    TvOverlayRegistry.instance.closeAll();
     final focused = FocusManager.instance.primaryFocus;
     final contexts = <BuildContext>[
       if (focused?.context != null &&

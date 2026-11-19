@@ -104,6 +104,30 @@ void main() {
     await gate.run(gate.begin(), (_) async { called = true; });
     expect(called, isTrue);
   });
+  test('manual NEXT after native gapless transition advances past the already-playing item', () async {
+    final gate = LatestOperation();
+    var currentIndex = 0;
+    final paths = ['A', 'B', 'C'];
+    final metadata = Completer<void>();
+    final metadataStarted = Completer<void>();
+    final transition = gate.begin();
+    // The native playlist event means B is already audible, before metadata resolves.
+    currentIndex = nextGaplessIndex(currentIndex, paths.length);
+    final loading = gate.run(transition, (active) async {
+      metadataStarted.complete();
+      await metadata.future;
+      if (active()) currentIndex = 1;
+    });
+    await metadataStarted.future;
+    currentIndex = nextGaplessIndex(currentIndex, paths.length);
+    final manual = gate.begin();
+    String? opened;
+    final playing = gate.run(manual, (_) async { opened = paths[currentIndex]; });
+    metadata.complete();
+    await Future.wait([loading, playing]);
+    expect(opened, 'C');
+    expect(currentIndex, 2);
+  });
   for (final resume in [false, true]) {
     test('pause while preparing preserves intent (resume=$resume)', () async {
       final gate = LatestOperation();

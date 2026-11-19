@@ -1,9 +1,22 @@
 /// Index of the same playing item after a reorder/removal. If the playing item
 /// was removed, retain its predecessor so NEXT selects the following item.
-int reconcilePlayingIndex(List<String> paths, String currentPath, int previous) {
-  final found = paths.indexOf(currentPath);
+int reconcilePlayingIndex(List<String> paths, String currentPath, int previous, {String Function(String)? identityOf}) {
+  final identity = identityOf ?? (String value) => value;
+  final key = identity(currentPath);
+  final found = paths.indexWhere((path) => identity(path) == key);
   if (found >= 0) return found;
   return (previous - 1).clamp(-1, paths.length - 1).toInt();
+}
+
+int nextGaplessIndex(int currentIndex, int count, {List<int>? shuffleOrder, bool repeatOne = false}) {
+  if (count <= 0) return 0;
+  if (repeatOne) return currentIndex;
+  if (shuffleOrder != null && shuffleOrder.length == count) {
+    final position = shuffleOrder.indexOf(currentIndex);
+    if (position < 0 || position == shuffleOrder.length - 1) return shuffleOrder.first;
+    return shuffleOrder[position + 1];
+  }
+  return (currentIndex + 1) % count;
 }
 
 /// Compute a queue edit without removing the item that is currently playing.

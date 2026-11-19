@@ -820,6 +820,7 @@ class TvFocusNavigatorObserver extends NavigatorObserver {
 
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    TvOverlayRegistry.instance.closeAll();
     currentRoute = route;
     TvFocusController.instance.scheduleFocusForRoute(route);
   }
@@ -870,6 +871,10 @@ class TvOverlayRegistry {
     if (_closers.isEmpty) return false;
     _closers.removeLast()();
     return true;
+  }
+
+  void closeAll() {
+    while (closeTop()) {}
   }
 }
 

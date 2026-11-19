@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -411,18 +412,25 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   Future<void> _toggleFavorite(RemoteEntry entry) async {
     final song = _songOf(entry);
     final key = RemoteMediaRegistry.identityOf(song.filePath);
+    final canonicalPaths = context.read<PlaylistContentNotifier>().playlists
+        .where((playlist) => playlist.isDefault)
+        .expand((playlist) => playlist.songFilePaths)
+        .where((path) => RemoteMediaRegistry.identityOf(path) == key)
+        .toList();
     final previous = NetworkLibraryStore.instance.favorites.where(
       (s) => RemoteMediaRegistry.identityOf(s.filePath) == key,
     ).map((s) => s.filePath).toList();
-    final added = await NetworkLibraryStore.instance.toggle(song);
+    final added = canonicalPaths.isEmpty;
     if (added) {
+      await NetworkLibraryStore.instance.addAll([song]);
       await _syncFavoritesToPlaylist([song]);
     } else {
+      await NetworkLibraryStore.instance.remove(song.filePath);
       final id = _favoritesPlaylistId();
       if (id != null) {
         await context
             .read<PlaylistContentNotifier>()
-            .removeSongPathsFromPlaylist(id, [...previous, song.filePath]);
+            .removeSongPathsFromPlaylist(id, [...canonicalPaths, ...previous, song.filePath]);
       }
     }
     if (mounted) setState(() {});
@@ -587,9 +595,13 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    final signature = context.select<PlaylistContentNotifier, String>(
+      (notifier) => NetworkLibraryStore.playlistSignature(notifier.playlists),
+    );
+    final favoriteKeys = (jsonDecode(signature) as List).cast<String>().toSet();
     final scheme = Theme.of(context).colorScheme;
     // 进入指定网盘后不再显示左侧配置面板，文件列表占满整个可用区域。
-    if (_active != null) return _buildBrowserPane(scheme);
+    if (_active != null) return _buildBrowserPane(scheme, favoriteKeys);
     return _buildSourcePane(scheme);
   }
 
@@ -685,7 +697,7 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
     );
   }
 
-  Widget _buildBrowserPane(ColorScheme scheme) {
+  Widget _buildBrowserPane(ColorScheme scheme, Set<String> favoriteKeys) {
     final active = _active!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
@@ -739,13 +751,13 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
             ],
           ),
           const SizedBox(height: 8),
-          Expanded(child: _buildEntryList(scheme)),
+          Expanded(child: _buildEntryList(scheme, favoriteKeys)),
         ],
       ),
     );
   }
 
-  Widget _buildEntryList(ColorScheme scheme) {
+  Widget _buildEntryList(ColorScheme scheme, Set<String> favoriteKeys) {
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -792,8 +804,8 @@ class NetworkSourcesViewState extends State<NetworkSourcesView>
       itemBuilder: (context, index) {
         final entry = entries[index];
         final Song? song = entry.isDirectory ? null : _songOf(entry);
-        final favorite =
-            song != null && NetworkLibraryStore.instance.isFavorite(song.filePath);
+        final favorite = song != null &&
+            favoriteKeys.contains(RemoteMediaRegistry.identityOf(song.filePath));
         final main = TvActionButton(
           label: _displayLabel(entry, song),
           value: _displayValue(entry, song),

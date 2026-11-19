@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:myune_music/layout/navigation_notifier.dart';
 import 'package:myune_music/tv/tv_focus_nav.dart';
 import 'package:myune_music/tv/tv_navigation.dart';
+import 'package:myune_music/widgets/hover_overlay_control.dart';
 
 Future<void> back(WidgetTester tester) async {
   // The production handler deliberately coalesces duplicate native / Flutter Back events.
@@ -14,6 +15,38 @@ Future<void> back(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('opening queue dismisses the old persistent volume overlay', (tester) async {
+    final navigation = NavigationNotifier();
+    addTearDown(navigation.dispose);
+    await tester.pumpWidget(ChangeNotifierProvider.value(
+      value: navigation,
+      child: MaterialApp(
+        navigatorKey: tvRootNavigatorKey,
+        navigatorObservers: [TvFocusNavigatorObserver()],
+        home: Scaffold(
+          key: tvScaffoldKey,
+          endDrawer: const Drawer(child: Text('queue')),
+          body: HoverOverlayControl(
+            icon: Icons.volume_up, iconColor: Colors.blue,
+            overlayOffset: const Offset(0, 50),
+            overlayContentBuilder: (_) => TextButton(
+              onPressed: () {}, child: const Text('volume overlay'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.byIcon(Icons.volume_up));
+    await tester.pumpAndSettle();
+    expect(TvOverlayRegistry.instance.hasOverlay, isTrue);
+    TvBackHandler.openQueue();
+    await tester.pumpAndSettle();
+    expect(tvScaffoldKey.currentState!.isEndDrawerOpen, isTrue);
+    expect(TvOverlayRegistry.instance.hasOverlay, isFalse);
+    expect(find.text('volume overlay'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Back closes popup in nested Navigator instead of exiting app', (tester) async {
     final navigation = NavigationNotifier();
     addTearDown(navigation.dispose);

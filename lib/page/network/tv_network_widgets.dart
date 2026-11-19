@@ -83,58 +83,44 @@ class TvActionButton extends StatelessWidget {
                   color: background,
                   borderRadius: BorderRadius.circular(9),
                 ),
-                // AlertDialog.actions 由 OverflowBar 布局，主轴宽度是无界的；
-                // Row 里若有 Spacer / Flexible（flex>0）会直接抛
-                // “RenderFlex children have non-zero flex but incoming width
-                // constraints are unbounded”。因此在无界宽度时退化成自适应宽度、
-                // 无 flex 子项的紧凑行；有界宽度（列表 / 固定宽度容器）时仍保留
-                // 右对齐数值的原本外观。
-                child: LayoutBuilder(
-                  builder: (BuildContext context, BoxConstraints constraints) {
-                    final spread = constraints.hasBoundedWidth;
-                    final Widget? valueWidget = value == null
-                        ? null
-                        : ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 260),
-                            child: Text(
-                              value!,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              textAlign: TextAlign.end,
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                          );
-                    return Row(
-                      mainAxisSize:
-                          spread ? MainAxisSize.max : MainAxisSize.min,
-                      children: <Widget>[
-                        if (icon != null) ...<Widget>[
-                          Icon(icon, size: 19, color: scheme.onSurfaceVariant),
-                          const SizedBox(width: 10),
-                        ],
-                        if (spread)
-                          Flexible(child: _labelText(scheme))
-                        else
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 220),
-                            child: _labelText(scheme),
-                          ),
-                        if (valueWidget != null) ...<Widget>[
-                          if (spread)
-                            const Spacer()
-                          else
+                // Dialog actions are intrinsically measured and may have an
+                // unbounded width. A shrink-wrapped Row with loose Flexible
+                // children works there and still fills tightly bounded rows.
+                // LayoutBuilder cannot answer AlertDialog's intrinsic queries.
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: <Widget>[
+                    Flexible(
+                      fit: FlexFit.loose,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (icon != null) ...[
+                            Icon(icon, size: 19, color: scheme.onSurfaceVariant),
                             const SizedBox(width: 10),
-                          if (spread)
-                            Flexible(child: valueWidget)
-                          else
-                            valueWidget,
+                          ],
+                          Flexible(fit: FlexFit.loose, child: _labelText(scheme)),
                         ],
-                      ],
-                    );
-                  },
+                      ),
+                    ),
+                    if (value != null) ...<Widget>[
+                      const SizedBox(width: 10),
+                      Flexible(
+                        fit: FlexFit.loose,
+                        child: Text(
+                          value!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.end,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               );
             },
@@ -482,7 +468,8 @@ class _TvSourceEditorDialogState extends State<_TvSourceEditorDialog> {
         title: const Text('编辑 Google Drive（只读）'),
         content: SizedBox(
           width: 480,
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
+          child: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
             TvActionButton(
               label: '名称', value: _name, autofocus: true,
               onPressed: () => _edit(title: '名称', current: _name,
@@ -494,7 +481,8 @@ class _TvSourceEditorDialogState extends State<_TvSourceEditorDialog> {
               onPressed: () => _edit(title: '根文件夹 ID', current: _root,
                   hint: '留空 = 我的云端硬盘', onSaved: (value) => _root = value),
             ),
-          ]),
+            ]),
+          ),
         ),
         actions: [
           TvActionButton(label: '取消', onPressed: () => Navigator.of(context).pop()),

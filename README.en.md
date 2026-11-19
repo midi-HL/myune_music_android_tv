@@ -38,7 +38,19 @@
 
 ## 0. What's new & feature overview
 
-### 0.1 What's new in v1.7.0
+### 0.1 v1.7.1 audit candidate
+
+This patch addresses directional navigation, editing and Back behavior, playback
+queue state and stale asynchronous work, network favorites, and Drive pairing.
+The Android package and in-app version now agree on `1.7.1` (versionCode `10701`),
+using the existing signing certificate.
+
+Dart analysis, business/widget regression tests and Go/Python pairing tests now
+precede the three APK builds. Device, remote, IME and real-account playback
+checks are pending while the emulator is used by another session. Published
+stable releases remain listed in Releases. See [patch notes](CHANGELOG_v1.7.1.md).
+
+### v1.7.0 and earlier changes
 
 > Semantic versioning: new features bump the minor version, bug-only fixes bump the patch,
 > and each release gets its **own tag / Release** (`v1.0.0` → `v1.1.0` → `v1.1.1` →

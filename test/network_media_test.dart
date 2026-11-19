@@ -27,6 +27,21 @@ Song biliSong({String title = 'old', String mode = 'audio', int port = 18765}) =
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
+  test('retained-page favorite signature changes only with default drive membership', () {
+    final url = proxyUrl({'k': 'nas', 's': 'drive', 'p': '/song.flac'});
+    final favorite = Playlist(name: 'favorites', isDefault: true, songFilePaths: [url]);
+    final other = Playlist(name: 'other');
+    final before = NetworkLibraryStore.playlistSignature([favorite, other]);
+    other.songFilePaths.add('/local.mp3');
+    expect(NetworkLibraryStore.playlistSignature([favorite, other]), before);
+    favorite.songFilePaths[0] = proxyUrl(
+      {'k': 'nas', 's': 'drive', 'p': '/song.flac', 't': 'new'}, port: 18766,
+    );
+    expect(NetworkLibraryStore.playlistSignature([favorite, other]), before);
+    favorite.songFilePaths.clear();
+    expect(NetworkLibraryStore.playlistSignature([favorite, other]), isNot(before));
+  });
+
   test('normal directory click excludes hidden video and enqueue selects one row', () {
     const first = RemoteEntry(name: 'first.flac', path: '/first.flac', isDirectory: false);
     const selected = RemoteEntry(name: 'second.mp3', path: '/second.mp3', isDirectory: false);

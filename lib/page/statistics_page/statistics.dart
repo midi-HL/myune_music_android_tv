@@ -11,6 +11,7 @@ import '../setting/settings_provider.dart';
 import '../playlist/playlist_models.dart';
 import '../../services/search_service.dart';
 import '../../utils/search_debouncer.dart';
+import '../../utils/artist_separator_logic.dart';
 import '../../widgets/custom_background_layer.dart';
 import '../../widgets/song_cover.dart';
 import 'statistics_manager.dart';
@@ -180,7 +181,10 @@ class _StatisticsState extends State<Statistics> {
               const SizedBox(height: 24),
 
               ListenableBuilder(
-                listenable: playlistNotifier.coverStore,
+                listenable: Listenable.merge([
+                  playlistNotifier.coverStore,
+                  _statsManager.statisticsData,
+                ]),
                 builder: (context, _) => Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -664,16 +668,7 @@ class _StatisticsState extends State<Statistics> {
   }
 
   List<String> _splitArtists(String artistString, List<String> separators) {
-    var result = [artistString];
-    for (final separator in separators) {
-      final newResult = <String>[];
-      for (final str in result) {
-        newResult.addAll(str.split(separator));
-      }
-      result = newResult;
-    }
-
-    return result;
+    return splitArtistNames(artistString, separators);
   }
 
   // 从封面仓库里查询某首歌的封面

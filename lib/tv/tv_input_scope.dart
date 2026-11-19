@@ -152,10 +152,10 @@ class _TvInputScopeState extends State<TvInputScope> {
 
     switch (action) {
       case TvAction.play:
-        if (!notifier.isPlaying) notifier.play();
+        notifier.play();
         break;
       case TvAction.pause:
-        if (notifier.isPlaying) notifier.pause();
+        notifier.pause();
         break;
       case TvAction.stop:
         notifier.stop();
@@ -201,6 +201,7 @@ class _TvInputScopeState extends State<TvInputScope> {
         );
         break;
       case TvAction.openPlayerPage:
+        TvOverlayRegistry.instance.closeAll();
         tvRootNavigatorKey.currentState?.push(
           MaterialPageRoute<void>(
             builder: (_) => const SongDetailPage(),

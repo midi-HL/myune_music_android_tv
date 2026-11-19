@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import '../../utils/artist_separator_logic.dart';
 
 // 歌曲播放统计信息
 class SongPlayStat {
@@ -144,21 +145,8 @@ class StatisticsData extends ChangeNotifier {
   }
 
   // 分割艺术家字符串
-  List<String> _splitArtists(String artistString, List<String>? separators) {
-    // 使用传入的分隔符或者默认分隔符
-    final sepList = separators ?? const [';', '；', ',', '，', '、'];
-
-    var result = [artistString];
-    for (final separator in sepList) {
-      final newResult = <String>[];
-      for (final str in result) {
-        newResult.addAll(str.split(separator));
-      }
-      result = newResult;
-    }
-
-    return result;
-  }
+  List<String> _splitArtists(String artistString, List<String>? separators) =>
+      splitArtistNames(artistString, separators ?? const [';', '；', ',', '，', '、']);
 
   // 总歌曲数
   int get totalSongs => _songStats.length;

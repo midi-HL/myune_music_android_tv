@@ -88,14 +88,8 @@ class VolumeControlState extends State<VolumeControl> {
           SizedBox(
             width: 44,
             height: 130,
-            child: TvAdjustableSlider(
-              vertical: true,
-              value: playlistNotifier.volume,
-              min: 0,
-              max: 100,
-              divisions: 100,
-              onChanged: playlistNotifier.setVolume,
-              child: RotatedBox(
+            child: Builder(builder: (context) {
+              final slider = RotatedBox(
               quarterTurns: -1, // 横向滑块旋转成垂直显示
               child: SliderTheme(
                 data: SliderTheme.of(context).copyWith(
@@ -120,8 +114,18 @@ class VolumeControlState extends State<VolumeControl> {
                   },
                 ),
               ),
-              ),
-            ),
+              );
+              if (!Platform.isAndroid) return slider;
+              return TvAdjustableSlider(
+                vertical: true,
+                value: playlistNotifier.volume,
+                min: 0,
+                max: 100,
+                divisions: 100,
+                onChanged: playlistNotifier.setVolume,
+                child: slider,
+              );
+            }),
           ),
           const SizedBox(height: 6),
           Consumer<PlaylistContentNotifier>(

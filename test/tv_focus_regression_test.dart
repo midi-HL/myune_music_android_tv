@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:myune_music/tv/tv_focus_nav.dart';
@@ -9,6 +10,10 @@ Widget canvas(Widget child) => MaterialApp(
 
 void main() {
   testWidgets('single-line input keeps horizontal editing and exits vertically', (tester) async {
+    // Android IME handles caret arrows outside the widget test process. Use
+    // desktop text shortcuts to assert that our shared input layer passes them.
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final input = FocusNode();
     final below = FocusNode();
     final controller = TextEditingController();
@@ -64,7 +69,9 @@ void main() {
         ),
       ),
     )));
-    expect(TvFocusController.rectOf(node)?.size, const Size(40, 100));
+    final rotated = TvFocusController.rectOf(node)!;
+    expect(rotated.width, closeTo(40, 0.000001));
+    expect(rotated.height, closeTo(100, 0.000001));
   });
 
   testWidgets('outer hidden ancestors exclude nested visible focus', (tester) async {
