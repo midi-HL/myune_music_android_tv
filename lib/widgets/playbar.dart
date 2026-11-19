@@ -470,6 +470,7 @@ class _PlaybarState extends State<Playbar> {
                         padding: const EdgeInsets.only(top: 1.5),
                         onPressed: () {
                           // 打开右侧抽屉，并把焦点移到抽屉内第一个控件。
+                          TvOverlayRegistry.instance.closeAll();
                           Scaffold.of(context).openEndDrawer();
                           TvFocusController.instance
                               .scheduleFocusInDrawer();

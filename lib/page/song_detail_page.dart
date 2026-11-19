@@ -702,8 +702,10 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                         CrossAxisAlignment.center,
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      // 歌曲信息
-                                      Consumer<PlaylistContentNotifier>(
+                                      // Give the controls their full height and
+                                      // let the cover use the remaining space.
+                                      Flexible(
+                                        child: Consumer<PlaylistContentNotifier>(
                                         builder: (context, playlistNotifier, child) {
                                           final currentSong =
                                               playlistNotifier.currentSong;
@@ -755,12 +757,15 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                               );
 
                                               return Column(
+                                                mainAxisSize: MainAxisSize.min,
                                                 crossAxisAlignment:
                                                     CrossAxisAlignment.center,
                                                 children: [
-                                                  SizedBox(
+                                                  Flexible(
+                                                    child: SizedBox(
                                                     width: imageSize,
                                                     child: Column(
+                                                      mainAxisSize: MainAxisSize.min,
                                                       crossAxisAlignment:
                                                           CrossAxisAlignment
                                                               .stretch,
@@ -897,8 +902,15 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                                           height: 6 * scale,
                                                         ),
                                                         // 专辑封面
-                                                        SizedBox.square(
-                                                          dimension: imageSize,
+                                                        Flexible(
+                                                          child: LayoutBuilder(
+                                                            builder: (context, constraints) => Center(
+                                                              heightFactor: 1,
+                                                              child: SizedBox.square(
+                                                          dimension: math.min(
+                                                            imageSize,
+                                                            constraints.maxHeight,
+                                                          ),
                                                           child: DecoratedBox(
                                                             decoration: BoxDecoration(
                                                               borderRadius:
@@ -964,7 +976,11 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                                             ),
                                                           ),
                                                         ),
+                                                            ),
+                                                          ),
+                                                        ),
                                                       ],
+                                                    ),
                                                     ),
                                                   ),
                                                   SizedBox(height: 8 * scale),
@@ -986,6 +1002,7 @@ class _SongDetailPageState extends State<SongDetailPage> {
                                             },
                                           );
                                         },
+                                        ),
                                       ),
                                     ],
                                   ),

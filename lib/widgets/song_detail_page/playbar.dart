@@ -34,6 +34,7 @@ Widget buildLyricsSettingsButton(
     iconSize: size,
     tooltip: '歌词显示设置',
     onPressed: () {
+      TvOverlayRegistry.instance.closeAll();
       Scaffold.of(context).openDrawer();
       TvFocusController.instance.scheduleFocusInDrawer();
     },
@@ -290,6 +291,7 @@ class _PlaybarState extends State<Playbar> {
                       tooltip: '播放列表',
                       onPressed: () {
                         // 打开右侧抽屉
+                        TvOverlayRegistry.instance.closeAll();
                         Scaffold.of(context).openEndDrawer();
                         TvFocusController.instance
                             .scheduleFocusInDrawer();
