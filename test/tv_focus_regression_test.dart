@@ -12,8 +12,6 @@ void main() {
   testWidgets('single-line input keeps horizontal editing and exits vertically', (tester) async {
     // Android IME handles caret arrows outside the widget test process. Use
     // desktop text shortcuts to assert that our shared input layer passes them.
-    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
-    addTearDown(() => debugDefaultTargetPlatformOverride = null);
     final input = FocusNode();
     final below = FocusNode();
     final controller = TextEditingController();
@@ -51,7 +49,7 @@ void main() {
     await tester.pump();
     expect(input.hasPrimaryFocus, isTrue);
     await tester.pumpWidget(const SizedBox.shrink());
-  });
+  }, variant: TargetPlatformVariant(<TargetPlatform>{TargetPlatform.linux}));
 
   testWidgets('focus bounds include scale and rotation', (tester) async {
     final node = FocusNode();
